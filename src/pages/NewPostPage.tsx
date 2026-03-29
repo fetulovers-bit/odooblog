@@ -145,7 +145,6 @@ export default function NewPostPage() {
               type: 'internal',
               prompt,
               url: imgData.url,
-              dataUrl: imgData.dataUrl,
               sectionReference: sectionRef,
               altText,
             });

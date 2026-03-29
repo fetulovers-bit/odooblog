@@ -357,8 +357,12 @@ serve(async (req) => {
             }
 
             if (base64) {
+              const dataImage = `data:${mimeType};base64,${base64}`;
               values.cover_properties = JSON.stringify({
-                background_image: `data:${mimeType};base64,${base64}`,
+                // Odoo website cover parser expects CSS-style keys.
+                "background-image": `url('${dataImage}')`,
+                // Keep legacy key for compatibility with older custom themes/parsers.
+                background_image: dataImage,
                 resize_class: "cover_mid",
                 opacity: "0",
               });

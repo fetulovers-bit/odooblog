@@ -1,13 +1,13 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Save, TestTube, CheckCircle, XCircle, Loader2, Eye, EyeOff, RefreshCw } from 'lucide-react';
+import { Save, TestTube, CheckCircle, XCircle, Loader2, Eye, EyeOff, RefreshCw, Image } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { OdooConfig } from '@/types/blog';
 import { getOdooConfig, saveOdooConfig } from '@/lib/storage';
-import { testOdooConnection, fetchOdooBlogs, fetchOdooTags } from '@/lib/odoo';
+import { testOdooConnection, fetchOdooBlogs, fetchOdooTags, syncOdooPostCovers } from '@/lib/odoo';
 import { toast } from 'sonner';
 
 interface OdooBlog { id: number; name: string; }
@@ -38,6 +38,7 @@ export default function SettingsPage() {
   const [blogs, setBlogs] = useState<OdooBlog[]>([]);
   const [tags, setTags] = useState<OdooTag[]>([]);
   const [loadingBlogs, setLoadingBlogs] = useState(false);
+  const [syncingCovers, setSyncingCovers] = useState(false);
 
   const update = (field: keyof OdooConfig, value: string) => {
     setConfig(prev => ({ ...prev, [field]: value }));
@@ -128,6 +129,24 @@ export default function SettingsPage() {
     toast.success('Configurações salvas!');
   };
 
+  const handleSyncCovers = async () => {
+    const currentConfig = normalizeConfig(config);
+
+    if (!currentConfig.url || !currentConfig.login || !currentConfig.apiKey) {
+      toast.error('Preencha URL, login e API Key antes de sincronizar');
+      return;
+    }
+
+    setSyncingCovers(true);
+    try {
+      const result = await syncOdooPostCovers(currentConfig);
+      toast.success(result.message || `Capas sincronizadas: ${result.updated || 0}`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Erro ao sincronizar capas');
+    }
+    setSyncingCovers(false);
+  };
+
   return (
     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="max-w-2xl space-y-6">
       <div>
@@ -179,6 +198,10 @@ export default function SettingsPage() {
           <Button onClick={handleFetchBlogs} disabled={loadingBlogs || testResult !== 'success'} variant="outline" className="gap-2">
             {loadingBlogs ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
             Buscar Blogs e Tags
+          </Button>
+          <Button onClick={handleSyncCovers} disabled={syncingCovers || testResult !== 'success'} variant="outline" className="gap-2">
+            {syncingCovers ? <Loader2 className="w-4 h-4 animate-spin" /> : <Image className="w-4 h-4" />}
+            Sincronizar Capas
           </Button>
           {testResult === 'success' && <div className="flex items-center gap-1.5 text-success text-sm"><CheckCircle className="w-4 h-4" /> {testMessage}</div>}
           {testResult === 'error' && <div className="flex items-start gap-1.5 text-destructive text-sm max-w-md"><XCircle className="w-4 h-4 shrink-0 mt-0.5" /> <span className="break-words whitespace-normal">{testMessage}</span></div>}

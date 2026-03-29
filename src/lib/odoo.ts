@@ -56,6 +56,10 @@ export async function fetchOdooPosts(config?: OdooConfig) {
   return callProxy("fetch_posts", {}, config);
 }
 
+export async function syncOdooPostCovers(config?: OdooConfig) {
+  return callProxy("sync_post_covers", {}, config);
+}
+
 export interface PublishPostData {
   title: string;
   subtitle?: string;

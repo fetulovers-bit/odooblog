@@ -19,6 +19,25 @@ function getBase64FromDataUrl(dataUrl: string): { mimeType: string; base64: stri
   return { mimeType: match[1], base64: match[2] };
 }
 
+function hasCoverInProperties(coverProperties: unknown): boolean {
+  if (!coverProperties) return false;
+  try {
+    const parsed = typeof coverProperties === "string" ? JSON.parse(coverProperties) : coverProperties;
+    if (!parsed || typeof parsed !== "object") return false;
+
+    const cssBackground = (parsed as Record<string, unknown>)["background-image"];
+    const legacyBackground = (parsed as Record<string, unknown>).background_image;
+    return Boolean(cssBackground || legacyBackground);
+  } catch {
+    return false;
+  }
+}
+
+function extractFirstImageSrc(html: string): string | null {
+  const match = html?.match(/<img[^>]+src=["']([^"']+)["']/i);
+  return match?.[1] || null;
+}
+
 interface OdooSession {
   uid: number;
   database: string;
@@ -404,6 +423,63 @@ serve(async (req) => {
 
         return new Response(
           JSON.stringify({ success: true, postId, message: "Post publicado com sucesso no Odoo!" }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // ---- SYNC COVER FOR EXISTING POSTS ----
+      case "sync_post_covers": {
+        const session = await authenticate(params);
+        const domain: unknown[] = [["website_published", "=", true]];
+        if (odooConfig.blogId) {
+          domain.push(["blog_id", "=", parseInt(odooConfig.blogId)]);
+        }
+
+        const posts = await callModel(session, params, "blog.post", "search_read", [
+          domain,
+          ["id", "name", "content", "cover_properties", "website_published"],
+        ], { limit: 500, order: "write_date desc" }) as Array<Record<string, unknown>>;
+
+        let updated = 0;
+        let withoutImage = 0;
+        let alreadyCovered = 0;
+
+        for (const post of posts) {
+          const postId = Number(post.id);
+          const content = String(post.content || "");
+          const coverProperties = post.cover_properties;
+
+          if (hasCoverInProperties(coverProperties)) {
+            alreadyCovered++;
+            continue;
+          }
+
+          const firstImage = extractFirstImageSrc(content);
+          if (!firstImage) {
+            withoutImage++;
+            continue;
+          }
+
+          await callModel(session, params, "blog.post", "write", [[postId], {
+            cover_properties: JSON.stringify({
+              "background-image": `url('${firstImage}')`,
+              background_image: firstImage,
+              resize_class: "cover_mid",
+              opacity: "0",
+            }),
+          }]);
+          updated++;
+        }
+
+        return new Response(
+          JSON.stringify({
+            success: true,
+            updated,
+            withoutImage,
+            alreadyCovered,
+            total: posts.length,
+            message: `Sincronização concluída: ${updated} atualizados, ${alreadyCovered} já tinham capa, ${withoutImage} sem imagem no conteúdo.`,
+          }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }

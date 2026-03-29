@@ -616,8 +616,8 @@ serve(async (req) => {
   } catch (e) {
     console.error("odoo-proxy error:", e);
     return new Response(
-      JSON.stringify({ error: e instanceof Error ? e.message : "Erro desconhecido" }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      JSON.stringify({ success: false, error: e instanceof Error ? e.message : "Erro desconhecido" }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
 });

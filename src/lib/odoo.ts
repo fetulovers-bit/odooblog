@@ -29,7 +29,19 @@ async function callProxy(action: string, extra: Record<string, unknown> = {}, co
   const { data, error } = await supabase.functions.invoke("odoo-proxy", {
     body: { action, odooConfig, ...extra },
   });
-  if (error) throw new Error(error.message || "Erro ao chamar o proxy Odoo");
+  if (error) {
+    let message = error.message || "Erro ao chamar o proxy Odoo";
+    const response = (error as unknown as { context?: Response }).context;
+    if (response) {
+      try {
+        const payload = await response.json();
+        if (payload?.error) message = payload.error;
+      } catch {
+        // ignore parse errors and keep default message
+      }
+    }
+    throw new Error(message);
+  }
   if (data?.error) throw new Error(data.error);
   return data;
 }

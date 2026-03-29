@@ -9,6 +9,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { BlogPostDraft } from '@/types/blog';
 import { getDraft, saveDraft } from '@/lib/storage';
+import { publishToOdoo } from '@/lib/odoo';
 import { toast } from 'sonner';
 
 export default function EditorPage() {

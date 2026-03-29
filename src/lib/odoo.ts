@@ -2,16 +2,30 @@ import { supabase } from "@/integrations/supabase/client";
 import { OdooConfig } from "@/types/blog";
 import { getOdooConfig } from "./storage";
 
-function getConfig(): OdooConfig {
-  const config = getOdooConfig();
+function normalizeConfig(config: OdooConfig): OdooConfig {
+  return {
+    ...config,
+    url: config.url.trim().replace(/\/+$/, ""),
+    database: config.database?.trim() || "",
+    login: config.login.trim(),
+    apiKey: config.apiKey.trim(),
+    blogId: config.blogId?.trim(),
+    websiteId: config.websiteId?.trim(),
+    defaultLanguage: config.defaultLanguage?.trim() || "pt_BR",
+    defaultAuthor: config.defaultAuthor?.trim() || "",
+  };
+}
+
+function getConfig(configOverride?: OdooConfig): OdooConfig {
+  const config = configOverride ?? getOdooConfig();
   if (!config || !config.url || !config.login || !config.apiKey) {
     throw new Error("Configure a conexão com o Odoo em Configurações antes de continuar.");
   }
-  return config;
+  return normalizeConfig(config);
 }
 
-async function callProxy(action: string, extra: Record<string, unknown> = {}) {
-  const odooConfig = getConfig();
+async function callProxy(action: string, extra: Record<string, unknown> = {}, configOverride?: OdooConfig) {
+  const odooConfig = getConfig(configOverride);
   const { data, error } = await supabase.functions.invoke("odoo-proxy", {
     body: { action, odooConfig, ...extra },
   });
@@ -21,23 +35,25 @@ async function callProxy(action: string, extra: Record<string, unknown> = {}) {
 }
 
 export async function testOdooConnection(config: OdooConfig) {
+  const odooConfig = getConfig(config);
   const { data, error } = await supabase.functions.invoke("odoo-proxy", {
-    body: { action: "test_connection", odooConfig: config },
+    body: { action: "test_connection", odooConfig },
   });
   if (error) throw new Error(error.message || "Erro ao testar conexão");
+  if (data?.error) throw new Error(data.error);
   return data;
 }
 
-export async function fetchOdooBlogs() {
-  return callProxy("fetch_blogs");
+export async function fetchOdooBlogs(config?: OdooConfig) {
+  return callProxy("fetch_blogs", {}, config);
 }
 
-export async function fetchOdooTags() {
-  return callProxy("fetch_tags");
+export async function fetchOdooTags(config?: OdooConfig) {
+  return callProxy("fetch_tags", {}, config);
 }
 
-export async function fetchOdooPosts() {
-  return callProxy("fetch_posts");
+export async function fetchOdooPosts(config?: OdooConfig) {
+  return callProxy("fetch_posts", {}, config);
 }
 
 export interface PublishPostData {
@@ -51,6 +67,6 @@ export interface PublishPostData {
   publish?: boolean;
 }
 
-export async function publishToOdoo(postData: PublishPostData) {
-  return callProxy("publish_post", { postData });
+export async function publishToOdoo(postData: PublishPostData, config?: OdooConfig) {
+  return callProxy("publish_post", { postData }, config);
 }

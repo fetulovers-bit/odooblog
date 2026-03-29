@@ -1,8 +1,10 @@
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { PenSquare, Clock, Settings, FileText, TrendingUp, Sparkles } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { getDrafts } from '@/lib/storage';
 import { getOdooConfig } from '@/lib/storage';
+import { fetchOdooPosts } from '@/lib/odoo';
 
 const container = { hidden: {}, show: { transition: { staggerChildren: 0.08 } } };
 const item = { hidden: { opacity: 0, y: 20 }, show: { opacity: 1, y: 0 } };
@@ -10,14 +12,36 @@ const item = { hidden: { opacity: 0, y: 20 }, show: { opacity: 1, y: 0 } };
 export default function Dashboard() {
   const drafts = getDrafts();
   const config = getOdooConfig();
+  const [odooPostsCount, setOdooPostsCount] = useState<number | null>(null);
   const recentDrafts = drafts.slice(0, 5);
   const published = drafts.filter(d => d.status === 'publicado').length;
   const draftCount = drafts.filter(d => d.status === 'rascunho' || d.status === 'gerado').length;
+
+  useEffect(() => {
+    let alive = true;
+    const loadOdooPosts = async () => {
+      if (!config) {
+        setOdooPostsCount(null);
+        return;
+      }
+      try {
+        const result = await fetchOdooPosts(config);
+        if (!alive) return;
+        setOdooPostsCount((result.posts || []).length);
+      } catch {
+        if (!alive) return;
+        setOdooPostsCount(null);
+      }
+    };
+    loadOdooPosts();
+    return () => { alive = false; };
+  }, [config?.url, config?.database, config?.login, config?.apiKey, config?.blogId]);
 
   const stats = [
     { label: 'Total de Posts', value: drafts.length, icon: FileText, color: 'text-primary' },
     { label: 'Publicados', value: published, icon: TrendingUp, color: 'text-success' },
     { label: 'Rascunhos', value: draftCount, icon: Clock, color: 'text-warning' },
+    { label: 'Posts no Odoo', value: odooPostsCount ?? '—', icon: FileText, color: 'text-primary' },
   ];
 
   return (
@@ -44,7 +68,7 @@ export default function Dashboard() {
       )}
 
       {/* Stats */}
-      <motion.div variants={item} className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <motion.div variants={item} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {stats.map(s => (
           <div key={s.label} className="p-4 rounded-xl border border-border bg-card shadow-card">
             <div className="flex items-center gap-3">

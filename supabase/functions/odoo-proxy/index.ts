@@ -25,17 +25,31 @@ function hasCoverInProperties(coverProperties: unknown): boolean {
     const parsed = typeof coverProperties === "string" ? JSON.parse(coverProperties) : coverProperties;
     if (!parsed || typeof parsed !== "object") return false;
 
-    const cssBackground = (parsed as Record<string, unknown>)["background-image"];
-    const legacyBackground = (parsed as Record<string, unknown>).background_image;
-    return Boolean(cssBackground || legacyBackground);
+    const cssBackground = String((parsed as Record<string, unknown>)["background-image"] || "").trim();
+    const legacyBackground = String((parsed as Record<string, unknown>).background_image || "").trim();
+    const hasCss = cssBackground.length > 0 && cssBackground !== "none" && cssBackground !== "url('')" && cssBackground !== 'url("")';
+    const hasLegacy = legacyBackground.length > 0 && legacyBackground !== "none";
+    return hasCss || hasLegacy;
   } catch {
     return false;
   }
 }
 
 function extractFirstImageSrc(html: string): string | null {
-  const match = html?.match(/<img[^>]+src=["']([^"']+)["']/i);
-  return match?.[1] || null;
+  if (!html) return null;
+  const srcMatch = html.match(/<img[^>]+src=["']([^"']+)["']/i);
+  if (srcMatch?.[1]) return srcMatch[1];
+
+  const dataSrcMatch = html.match(/<img[^>]+data-src=["']([^"']+)["']/i);
+  if (dataSrcMatch?.[1]) return dataSrcMatch[1];
+
+  const srcSetMatch = html.match(/<img[^>]+srcset=["']([^"']+)["']/i);
+  if (srcSetMatch?.[1]) {
+    const firstEntry = srcSetMatch[1].split(",")[0]?.trim();
+    const url = firstEntry?.split(" ")[0];
+    if (url) return url;
+  }
+  return null;
 }
 
 interface OdooSession {
@@ -310,10 +324,20 @@ serve(async (req) => {
         if (odooConfig.blogId) {
           domain.push(["blog_id", "=", parseInt(odooConfig.blogId)]);
         }
-        const posts = await callModel(session, params, "blog.post", "search_read", [
-          domain,
-          ["id", "name", "subtitle", "website_meta_description", "tag_ids", "create_date", "write_date", "website_published", "blog_id"],
-        ], { limit: 100, order: "write_date desc" });
+        const posts: Array<Record<string, unknown>> = [];
+        const batchSize = 100;
+        let offset = 0;
+        while (true) {
+          const batch = await callModel(session, params, "blog.post", "search_read", [
+            domain,
+            ["id", "name", "subtitle", "website_meta_description", "tag_ids", "create_date", "write_date", "website_published", "blog_id"],
+          ], { limit: batchSize, offset, order: "write_date desc" }) as Array<Record<string, unknown>>;
+
+          posts.push(...batch);
+          if (batch.length < batchSize) break;
+          offset += batchSize;
+          if (offset > 5000) break; // safety cap
+        }
         return new Response(JSON.stringify({ success: true, posts, database: session.database }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
@@ -430,15 +454,25 @@ serve(async (req) => {
       // ---- SYNC COVER FOR EXISTING POSTS ----
       case "sync_post_covers": {
         const session = await authenticate(params);
-        const domain: unknown[] = [["website_published", "=", true]];
+        const domain: unknown[] = [];
         if (odooConfig.blogId) {
           domain.push(["blog_id", "=", parseInt(odooConfig.blogId)]);
         }
+        
+        const posts: Array<Record<string, unknown>> = [];
+        const batchSize = 100;
+        let offset = 0;
+        while (true) {
+          const batch = await callModel(session, params, "blog.post", "search_read", [
+            domain,
+            ["id", "name", "content", "cover_properties", "website_published"],
+          ], { limit: batchSize, offset, order: "write_date desc" }) as Array<Record<string, unknown>>;
 
-        const posts = await callModel(session, params, "blog.post", "search_read", [
-          domain,
-          ["id", "name", "content", "cover_properties", "website_published"],
-        ], { limit: 500, order: "write_date desc" }) as Array<Record<string, unknown>>;
+          posts.push(...batch);
+          if (batch.length < batchSize) break;
+          offset += batchSize;
+          if (offset > 5000) break; // safety cap
+        }
 
         let updated = 0;
         let withoutImage = 0;

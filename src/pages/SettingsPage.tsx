@@ -46,6 +46,9 @@ export default function SettingsPage() {
         setTestResult('success');
         setTestMessage(result.message || 'Conexão estabelecida!');
         toast.success('Conexão testada com sucesso!');
+        if (result.database && !config.database) {
+          setConfig(prev => ({ ...prev, database: result.database }));
+        }
       } else {
         setTestResult('error');
         setTestMessage(result.error || 'Falha na conexão');

@@ -42,16 +42,44 @@ async function odooJsonRpc(
   return data.result;
 }
 
+async function listDatabases(baseUrl: string): Promise<string[]> {
+  try {
+    const res = await fetch(`${baseUrl.replace(/\/+$/, "")}/web/database/list`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "call", params: {} }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return data.result || [];
+    }
+  } catch { /* ignore */ }
+  return [];
+}
+
+async function resolveDatabase(p: OdooRpcParams): Promise<string> {
+  if (p.database) return p.database;
+  const dbs = await listDatabases(p.url);
+  if (dbs.length === 1) return dbs[0];
+  if (dbs.length > 1) {
+    throw new Error(`Múltiplos bancos encontrados (${dbs.join(", ")}). Informe o nome do banco nas configurações.`);
+  }
+  throw new Error("Não foi possível detectar o banco de dados. Informe o nome manualmente nas configurações.");
+}
+
 async function authenticate(p: OdooRpcParams): Promise<number> {
-  const uid = await odooJsonRpc(p.url, "/web/session/authenticate", {
-    db: p.database,
+  const db = await resolveDatabase(p);
+  p.database = db;
+  const result = await odooJsonRpc(p.url, "/web/session/authenticate", {
+    db,
     login: p.login,
     password: p.apiKey,
   });
-  if (!uid || (typeof uid === "object" && !uid.uid)) {
-    throw new Error("Autenticação falhou. Verifique login e API Key.");
+  const uid = typeof result === "object" ? result?.uid : result;
+  if (!uid || uid === false) {
+    throw new Error("Autenticação falhou. Verifique login, API Key e nome do banco de dados.");
   }
-  return typeof uid === "object" ? uid.uid : uid;
+  return uid;
 }
 
 async function callModel(
@@ -102,27 +130,30 @@ serve(async (req) => {
     switch (action) {
       // ---- TEST CONNECTION ----
       case "test_connection": {
-        // Try to authenticate via session
         try {
+          // Auto-detect database if not provided
+          const resolvedDb = await resolveDatabase(params);
+          params.database = resolvedDb;
+
           const result = await odooJsonRpc(url, "/web/session/authenticate", {
-            db: dbName,
+            db: resolvedDb,
             login,
             password: apiKey,
           });
           const uid = typeof result === "object" ? result?.uid : result;
           if (!uid || uid === false) {
             return new Response(
-              JSON.stringify({ success: false, error: "Credenciais inválidas. Verifique login e API Key." }),
+              JSON.stringify({ success: false, error: `Credenciais inválidas para o banco "${resolvedDb}". Verifique login e API Key.` }),
               { headers: { ...corsHeaders, "Content-Type": "application/json" } }
             );
           }
           return new Response(
-            JSON.stringify({ success: true, uid, message: "Conexão estabelecida com sucesso!" }),
+            JSON.stringify({ success: true, uid, database: resolvedDb, message: `Conexão estabelecida! Banco: ${resolvedDb}` }),
             { headers: { ...corsHeaders, "Content-Type": "application/json" } }
           );
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
-          // Try alternative: version_info endpoint
+          // Check if server is reachable
           try {
             const versionRes = await fetch(`${url.replace(/\/+$/, "")}/web/webclient/version_info`, {
               method: "POST",
@@ -131,13 +162,13 @@ serve(async (req) => {
             });
             if (versionRes.ok) {
               return new Response(
-                JSON.stringify({ success: false, error: `Servidor Odoo encontrado, mas autenticação falhou: ${msg}` }),
+                JSON.stringify({ success: false, error: `Servidor encontrado, mas: ${msg}` }),
                 { headers: { ...corsHeaders, "Content-Type": "application/json" } }
               );
             }
           } catch { /* ignore */ }
           return new Response(
-            JSON.stringify({ success: false, error: `Não foi possível conectar ao Odoo: ${msg}` }),
+            JSON.stringify({ success: false, error: `Não foi possível conectar: ${msg}` }),
             { headers: { ...corsHeaders, "Content-Type": "application/json" } }
           );
         }

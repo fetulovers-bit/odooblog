@@ -100,8 +100,8 @@ export default function EditorPage() {
           <Button size="sm" variant="outline" onClick={handleExportHTML} className="gap-1.5">
             <Download className="w-3.5 h-3.5" /> Exportar
           </Button>
-          <Button size="sm" onClick={handlePublish} className="gap-1.5 gradient-primary border-0 text-primary-foreground hover:opacity-90">
-            <Send className="w-3.5 h-3.5" /> Publicar
+          <Button size="sm" onClick={handlePublish} disabled={publishing} className="gap-1.5 gradient-primary border-0 text-primary-foreground hover:opacity-90">
+            {publishing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />} {publishing ? 'Publicando...' : 'Publicar'}
           </Button>
         </div>
       </div>

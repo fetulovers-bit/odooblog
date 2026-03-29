@@ -112,6 +112,7 @@ export default function NewPostPage() {
             type: 'cover' as const,
             prompt: coverPrompt,
             url: coverData.url,
+            dataUrl: coverData.dataUrl,
             sectionReference: 'cover',
             altText: data.title || briefing.topic,
           };
@@ -144,6 +145,7 @@ export default function NewPostPage() {
               type: 'internal',
               prompt,
               url: imgData.url,
+              dataUrl: imgData.dataUrl,
               sectionReference: sectionRef,
               altText,
             });

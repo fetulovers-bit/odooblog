@@ -35,23 +35,6 @@ function hasCoverInProperties(coverProperties: unknown): boolean {
   }
 }
 
-function extractFirstImageSrc(html: string): string | null {
-  if (!html) return null;
-  const srcMatch = html.match(/<img[^>]+src=["']([^"']+)["']/i);
-  if (srcMatch?.[1]) return srcMatch[1];
-
-  const dataSrcMatch = html.match(/<img[^>]+data-src=["']([^"']+)["']/i);
-  if (dataSrcMatch?.[1]) return dataSrcMatch[1];
-
-  const srcSetMatch = html.match(/<img[^>]+srcset=["']([^"']+)["']/i);
-  if (srcSetMatch?.[1]) {
-    const firstEntry = srcSetMatch[1].split(",")[0]?.trim();
-    const url = firstEntry?.split(" ")[0];
-    if (url) return url;
-  }
-  return null;
-}
-
 function buildCoverProperties(imageUrlOrDataUrl: string) {
   return JSON.stringify({
     "background-image": `url('${imageUrlOrDataUrl}')`,
@@ -486,7 +469,7 @@ serve(async (req) => {
         while (true) {
           const batch = await callModel(session, params, "blog.post", "search_read", [
             domain,
-            ["id", "name", "content", "cover_properties", "website_published"],
+            ["id", "name", "cover_properties", "website_published"],
           ], { limit: batchSize, offset, order: "write_date desc" }) as Array<Record<string, unknown>>;
 
           posts.push(...batch);
@@ -496,28 +479,46 @@ serve(async (req) => {
         }
 
         let updated = 0;
-        let withoutImage = 0;
+        let withoutCover = 0;
         let alreadyCovered = 0;
+        let normalized = 0;
 
         for (const post of posts) {
           const postId = Number(post.id);
-          const content = String(post.content || "");
-          const coverProperties = post.cover_properties;
+          const coverPropertiesRaw = post.cover_properties;
+          let coverProperties: Record<string, unknown> = {};
+          if (typeof coverPropertiesRaw === "string" && coverPropertiesRaw.trim()) {
+            try {
+              coverProperties = JSON.parse(coverPropertiesRaw);
+            } catch {
+              coverProperties = {};
+            }
+          } else if (coverPropertiesRaw && typeof coverPropertiesRaw === "object") {
+            coverProperties = coverPropertiesRaw as Record<string, unknown>;
+          }
 
-          if (hasCoverInProperties(coverProperties)) {
+          const cssBackground = String(coverProperties["background-image"] || "").trim();
+          const legacyBackground = String(coverProperties.background_image || "").trim();
+          const source = cssBackground || legacyBackground;
+
+          if (!source) {
+            withoutCover++;
+            continue;
+          }
+
+          const hasStandardCss = cssBackground.startsWith("url(");
+          const hasLegacyKey = legacyBackground.length > 0;
+          if (hasStandardCss && hasLegacyKey && hasCoverInProperties(coverProperties)) {
             alreadyCovered++;
             continue;
           }
 
-          const firstImage = extractFirstImageSrc(content);
-          if (!firstImage) {
-            withoutImage++;
-            continue;
-          }
+          const normalizedSource = source.startsWith("url(") ? source.slice(4, -1).replace(/^['"]|['"]$/g, "") : source;
 
           await callModel(session, params, "blog.post", "write", [[postId], {
-            cover_properties: buildCoverProperties(firstImage),
+            cover_properties: buildCoverProperties(normalizedSource),
           }]);
+          normalized++;
           updated++;
         }
 
@@ -525,10 +526,11 @@ serve(async (req) => {
           JSON.stringify({
             success: true,
             updated,
-            withoutImage,
+            withoutCover,
             alreadyCovered,
+            normalized,
             total: posts.length,
-            message: `Sincronização concluída: ${updated} atualizados, ${alreadyCovered} já tinham capa, ${withoutImage} sem imagem no conteúdo.`,
+            message: `Sincronização concluída: ${updated} atualizados, ${alreadyCovered} já estavam corretos, ${withoutCover} sem capa definida.`,
           }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );

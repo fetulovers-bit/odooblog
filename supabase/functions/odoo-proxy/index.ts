@@ -13,6 +13,12 @@ interface OdooRpcParams {
   apiKey: string;
 }
 
+function getBase64FromDataUrl(dataUrl: string): { mimeType: string; base64: string } | null {
+  const match = dataUrl.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+  if (!match) return null;
+  return { mimeType: match[1], base64: match[2] };
+}
+
 interface OdooSession {
   uid: number;
   database: string;
@@ -328,15 +334,31 @@ serve(async (req) => {
           website_published: postData.publish !== false,
         };
 
-        if (postData.coverImageUrl) {
-          // Download image and convert to base64 for Odoo
+        if (postData.coverImageDataUrl || postData.coverImageUrl) {
+          // Prefer generated data URL to avoid public storage access issues.
           try {
-            const imgRes = await fetch(postData.coverImageUrl);
-            if (imgRes.ok) {
-              const buf = await imgRes.arrayBuffer();
-              const base64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+            let mimeType = "image/png";
+            let base64: string | null = null;
+
+            if (typeof postData.coverImageDataUrl === "string" && postData.coverImageDataUrl.startsWith("data:image/")) {
+              const parsed = getBase64FromDataUrl(postData.coverImageDataUrl);
+              if (parsed) {
+                mimeType = parsed.mimeType;
+                base64 = parsed.base64;
+              }
+            }
+
+            if (!base64 && postData.coverImageUrl) {
+              const imgRes = await fetch(postData.coverImageUrl);
+              if (imgRes.ok) {
+                const buf = await imgRes.arrayBuffer();
+                base64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+              }
+            }
+
+            if (base64) {
               values.cover_properties = JSON.stringify({
-                background_image: `data:image/png;base64,${base64}`,
+                background_image: `data:${mimeType};base64,${base64}`,
                 resize_class: "cover_mid",
                 opacity: "0",
               });

@@ -62,6 +62,7 @@ export interface PublishPostData {
   htmlContent: string;
   metaDescription?: string;
   coverImageUrl?: string;
+  coverImageDataUrl?: string;
   tags?: string[];
   blogId?: string;
   publish?: boolean;

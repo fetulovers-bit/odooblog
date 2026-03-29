@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { getDrafts, deleteDraft, saveDraft, getOdooConfig } from '@/lib/storage';
 import { BlogPostDraft } from '@/types/blog';
-import { fetchOdooPosts, updateOdooPost, deleteOdooPost } from '@/lib/odoo';
+import { fetchOdooPosts, updateOdooPost, deleteOdooPost, updateOdooPostCover } from '@/lib/odoo';
 import { toast } from 'sonner';
 
 export default function HistoryPage() {
@@ -94,6 +94,22 @@ export default function HistoryPage() {
     }
   };
 
+  const handleUploadCover = async (post: any, file: File) => {
+    if (!odooConfig) return;
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const dataUrl = String(reader.result || '');
+        await updateOdooPostCover(post.id, dataUrl, odooConfig);
+        toast.success('Capa atualizada no Odoo');
+        loadOdooPosts();
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Erro ao atualizar capa');
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
   return (
     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="max-w-4xl space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
@@ -162,6 +178,20 @@ export default function HistoryPage() {
                   <p className="text-xs text-muted-foreground">{new Date(post.write_date || post.create_date).toLocaleDateString('pt-BR')}</p>
                 </div>
                 <div className="flex items-center gap-1">
+                  <label className="inline-flex">
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={e => {
+                        const file = e.target.files?.[0];
+                        if (file) handleUploadCover(post, file);
+                      }}
+                    />
+                    <Button size="icon" variant="ghost" className="h-8 w-8" asChild>
+                      <span title="Atualizar capa">🖼️</span>
+                    </Button>
+                  </label>
                   <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => handleEditOdooPost(post)}><Edit className="w-3.5 h-3.5" /></Button>
                   <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive" onClick={() => handleDeleteOdooPost(post)}><Trash2 className="w-3.5 h-3.5" /></Button>
                 </div>

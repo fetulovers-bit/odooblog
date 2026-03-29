@@ -239,27 +239,6 @@ async function resolveOrCreateAuthorId(session: OdooSession, p: OdooRpcParams, a
   return Number(newId);
 }
 
-async function uploadCoverAttachmentAndGetUrl(
-  session: OdooSession,
-  p: OdooRpcParams,
-  postId: number,
-  base64: string,
-  mimeType: string
-): Promise<string | null> {
-  const attachmentId = await callModel(session, p, "ir.attachment", "create", [{
-    name: `blog-cover-${postId}`,
-    type: "binary",
-    datas: base64,
-    mimetype: mimeType,
-    res_model: "blog.post",
-    res_id: postId,
-    public: true,
-  }]);
-
-  if (!attachmentId) return null;
-  return `/web/image/ir.attachment/${attachmentId}/datas`;
-}
-
 serve(async (req) => {
   if (req.method === "OPTIONS")
     return new Response(null, { headers: corsHeaders });
@@ -443,27 +422,16 @@ serve(async (req) => {
         // Create the post
         const postId = await callModel(session, params, "blog.post", "create", [values]);
 
-        // Upload cover to Odoo and bind cover_properties to Odoo-hosted image URL.
+        // Upload cover directly into blog.post image field and bind cover_properties.
         if (coverBase64) {
           try {
-            const uploadedCoverUrl = await uploadCoverAttachmentAndGetUrl(
-              session,
-              params,
-              Number(postId),
-              coverBase64,
-              coverMimeType
-            );
-            if (uploadedCoverUrl) {
-              await callModel(session, params, "blog.post", "write", [[postId], {
-                cover_properties: buildCoverProperties(uploadedCoverUrl),
-              }]);
-            } else if (coverDataImage) {
-              await callModel(session, params, "blog.post", "write", [[postId], {
-                cover_properties: buildCoverProperties(coverDataImage),
-              }]);
-            }
+            const uploadedCoverUrl = `/web/image/blog.post/${postId}/image_1920`;
+            await callModel(session, params, "blog.post", "write", [[postId], {
+              image_1920: coverBase64,
+              cover_properties: buildCoverProperties(uploadedCoverUrl),
+            }]);
           } catch (e) {
-            console.error("Failed to upload cover image attachment:", e);
+            console.error("Failed to upload cover image into blog.post:", e);
             if (coverDataImage) {
               await callModel(session, params, "blog.post", "write", [[postId], {
                 cover_properties: buildCoverProperties(coverDataImage),
@@ -503,6 +471,34 @@ serve(async (req) => {
           JSON.stringify({ success: true, postId, message: "Post publicado com sucesso no Odoo!" }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
+      }
+
+      // ---- UPDATE POST COVER ----
+      case "update_post_cover": {
+        const session = await authenticate(params);
+        const { postId, coverDataUrl } = body as { postId?: number; coverDataUrl?: string };
+        if (!postId || !coverDataUrl) {
+          return new Response(JSON.stringify({ error: "postId and coverDataUrl are required" }), {
+            status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        const parsed = getBase64FromDataUrl(coverDataUrl);
+        if (!parsed) {
+          return new Response(JSON.stringify({ error: "Formato de imagem inválido" }), {
+            status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        const coverUrl = `/web/image/blog.post/${postId}/image_1920`;
+        await callModel(session, params, "blog.post", "write", [[postId], {
+          image_1920: parsed.base64,
+          cover_properties: buildCoverProperties(coverUrl),
+        }]);
+
+        return new Response(JSON.stringify({ success: true, message: "Capa atualizada com sucesso", coverUrl }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
       }
 
       // ---- SYNC COVER FOR EXISTING POSTS ----

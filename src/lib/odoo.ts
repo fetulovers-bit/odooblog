@@ -84,6 +84,10 @@ export async function deleteOdooPost(postId: number, config?: OdooConfig) {
   return callProxy("delete_post", { postId }, config);
 }
 
+export async function updateOdooPostCover(postId: number, coverDataUrl: string, config?: OdooConfig) {
+  return callProxy("update_post_cover", { postId, coverDataUrl }, config);
+}
+
 export async function applyAuthorToAllOdooPosts(authorName: string, config?: OdooConfig) {
   return callProxy("apply_author_to_all_posts", { authorName }, config);
 }

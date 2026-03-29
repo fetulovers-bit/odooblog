@@ -85,6 +85,25 @@ export default function EditorPage() {
     setPublishing(false);
   };
 
+  const handleCoverUpload = (file?: File) => {
+    if (!file || !draft) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = String(reader.result || '');
+      updateField('coverImage', {
+        id: draft.coverImage?.id || crypto.randomUUID(),
+        type: 'cover',
+        prompt: draft.coverImage?.prompt || `Capa para ${draft.title}`,
+        url: dataUrl,
+        dataUrl,
+        sectionReference: 'cover',
+        altText: draft.coverImage?.altText || draft.title,
+      });
+      toast.success('Imagem de capa atualizada no rascunho');
+    };
+    reader.readAsDataURL(file);
+  };
+
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
       {/* Top bar */}
@@ -198,13 +217,12 @@ export default function EditorPage() {
           </div>
 
           {/* Cover Image */}
-          {draft.coverImage && (
-            <div className="p-4 rounded-xl border border-border bg-card shadow-card space-y-3">
-              <h3 className="text-sm font-display font-semibold text-foreground">Imagem de Capa</h3>
-              <img src={draft.coverImage.url} alt={draft.coverImage.altText} className="w-full rounded-lg" />
-              <p className="text-xs text-muted-foreground">{draft.coverImage.altText}</p>
-            </div>
-          )}
+          <div className="p-4 rounded-xl border border-border bg-card shadow-card space-y-3">
+            <h3 className="text-sm font-display font-semibold text-foreground">Imagem de Capa</h3>
+            {draft.coverImage && <img src={draft.coverImage.url} alt={draft.coverImage.altText} className="w-full rounded-lg" />}
+            <Input type="file" accept="image/*" onChange={e => handleCoverUpload(e.target.files?.[0])} />
+            {draft.coverImage && <p className="text-xs text-muted-foreground">{draft.coverImage.altText}</p>}
+          </div>
 
           {/* Internal images */}
           {draft.internalImages.length > 0 && (

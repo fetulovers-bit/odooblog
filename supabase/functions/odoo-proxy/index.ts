@@ -20,7 +20,14 @@ interface OdooSession {
 }
 
 function normalizeBaseUrl(url: string) {
-  return url.trim().replace(/\/+$/, "");
+  // Strip trailing slashes and any path (e.g. /blog, /web) — Odoo RPC endpoints are always at root
+  const trimmed = url.trim().replace(/\/+$/, "");
+  try {
+    const parsed = new URL(trimmed);
+    return `${parsed.protocol}//${parsed.host}`;
+  } catch {
+    return trimmed;
+  }
 }
 
 function extractErrorMessage(error: unknown) {

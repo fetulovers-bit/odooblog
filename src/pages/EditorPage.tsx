@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Save, Send, Copy, Download, RefreshCw, ArrowLeft, Eye, Code } from 'lucide-react';
+import { Save, Send, Copy, Download, RefreshCw, ArrowLeft, Eye, Code, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -9,6 +9,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { BlogPostDraft } from '@/types/blog';
 import { getDraft, saveDraft } from '@/lib/storage';
+import { publishToOdoo } from '@/lib/odoo';
 import { toast } from 'sonner';
 
 export default function EditorPage() {
@@ -16,6 +17,7 @@ export default function EditorPage() {
   const navigate = useNavigate();
   const [draft, setDraft] = useState<BlogPostDraft | null>(null);
   const [viewMode, setViewMode] = useState<'preview' | 'html'>('preview');
+  const [publishing, setPublishing] = useState(false);
 
   useEffect(() => {
     if (id) {
@@ -57,10 +59,28 @@ export default function EditorPage() {
     toast.success('HTML exportado!');
   };
 
-  const handlePublish = () => {
-    // In production: call edge function to publish to Odoo
-    saveDraft({ ...draft, status: 'publicado' });
-    toast.success('Post marcado como publicado!');
+  const handlePublish = async () => {
+    if (!draft) return;
+    setPublishing(true);
+    try {
+      const result = await publishToOdoo({
+        title: draft.title,
+        subtitle: draft.subtitle,
+        htmlContent: draft.htmlContent,
+        metaDescription: draft.metaDescription,
+        coverImageUrl: draft.coverImage?.url,
+        tags: draft.tags,
+        publish: true,
+      });
+      saveDraft({ ...draft, status: 'publicado' });
+      setDraft(prev => prev ? { ...prev, status: 'publicado' } : null);
+      toast.success(result.message || 'Post publicado no Odoo!');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Erro ao publicar no Odoo');
+      saveDraft({ ...draft, status: 'erro' });
+      setDraft(prev => prev ? { ...prev, status: 'erro' } : null);
+    }
+    setPublishing(false);
   };
 
   return (
@@ -80,8 +100,8 @@ export default function EditorPage() {
           <Button size="sm" variant="outline" onClick={handleExportHTML} className="gap-1.5">
             <Download className="w-3.5 h-3.5" /> Exportar
           </Button>
-          <Button size="sm" onClick={handlePublish} className="gap-1.5 gradient-primary border-0 text-primary-foreground hover:opacity-90">
-            <Send className="w-3.5 h-3.5" /> Publicar
+          <Button size="sm" onClick={handlePublish} disabled={publishing} className="gap-1.5 gradient-primary border-0 text-primary-foreground hover:opacity-90">
+            {publishing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />} {publishing ? 'Publicando...' : 'Publicar'}
           </Button>
         </div>
       </div>

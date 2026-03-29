@@ -69,6 +69,7 @@ export default function EditorPage() {
         htmlContent: draft.htmlContent,
         metaDescription: draft.metaDescription,
         coverImageUrl: draft.coverImage?.url,
+        coverImageDataUrl: draft.coverImage?.dataUrl,
         tags: draft.tags,
         publish: true,
       });

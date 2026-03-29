@@ -89,7 +89,7 @@ serve(async (req) => {
       .from("blog-images")
       .getPublicUrl(filePath);
 
-    return new Response(JSON.stringify({ url: urlData.publicUrl }), {
+    return new Response(JSON.stringify({ url: urlData.publicUrl, dataUrl: imageData }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {

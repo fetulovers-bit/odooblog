@@ -239,6 +239,27 @@ async function resolveOrCreateAuthorId(session: OdooSession, p: OdooRpcParams, a
   return Number(newId);
 }
 
+async function uploadCoverAttachmentAndGetUrl(
+  session: OdooSession,
+  p: OdooRpcParams,
+  postId: number,
+  base64: string,
+  mimeType: string
+): Promise<string | null> {
+  const attachmentId = await callModel(session, p, "ir.attachment", "create", [{
+    name: `blog-cover-${postId}`,
+    type: "binary",
+    datas: base64,
+    mimetype: mimeType,
+    res_model: "blog.post",
+    res_id: postId,
+    public: true,
+  }]);
+
+  if (!attachmentId) return null;
+  return `/web/image/ir.attachment/${attachmentId}/datas`;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS")
     return new Response(null, { headers: corsHeaders });
@@ -383,31 +404,31 @@ serve(async (req) => {
           website_published: postData.publish !== false,
         };
 
+        let coverMimeType = "image/png";
+        let coverBase64: string | null = null;
+        let coverDataImage: string | null = null;
+
         if (postData.coverImageDataUrl || postData.coverImageUrl) {
           // Prefer generated data URL to avoid public storage access issues.
           try {
-            let mimeType = "image/png";
-            let base64: string | null = null;
-
             if (typeof postData.coverImageDataUrl === "string" && postData.coverImageDataUrl.startsWith("data:image/")) {
               const parsed = getBase64FromDataUrl(postData.coverImageDataUrl);
               if (parsed) {
-                mimeType = parsed.mimeType;
-                base64 = parsed.base64;
+                coverMimeType = parsed.mimeType;
+                coverBase64 = parsed.base64;
               }
             }
 
-            if (!base64 && postData.coverImageUrl) {
+            if (!coverBase64 && postData.coverImageUrl) {
               const imgRes = await fetch(postData.coverImageUrl);
               if (imgRes.ok) {
                 const buf = await imgRes.arrayBuffer();
-                base64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+                coverBase64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
               }
             }
 
-            if (base64) {
-              const dataImage = `data:${mimeType};base64,${base64}`;
-              values.cover_properties = buildCoverProperties(dataImage);
+            if (coverBase64) {
+              coverDataImage = `data:${coverMimeType};base64,${coverBase64}`;
             }
           } catch (e) {
             console.error("Failed to download cover image:", e);
@@ -421,6 +442,35 @@ serve(async (req) => {
 
         // Create the post
         const postId = await callModel(session, params, "blog.post", "create", [values]);
+
+        // Upload cover to Odoo and bind cover_properties to Odoo-hosted image URL.
+        if (coverBase64) {
+          try {
+            const uploadedCoverUrl = await uploadCoverAttachmentAndGetUrl(
+              session,
+              params,
+              Number(postId),
+              coverBase64,
+              coverMimeType
+            );
+            if (uploadedCoverUrl) {
+              await callModel(session, params, "blog.post", "write", [[postId], {
+                cover_properties: buildCoverProperties(uploadedCoverUrl),
+              }]);
+            } else if (coverDataImage) {
+              await callModel(session, params, "blog.post", "write", [[postId], {
+                cover_properties: buildCoverProperties(coverDataImage),
+              }]);
+            }
+          } catch (e) {
+            console.error("Failed to upload cover image attachment:", e);
+            if (coverDataImage) {
+              await callModel(session, params, "blog.post", "write", [[postId], {
+                cover_properties: buildCoverProperties(coverDataImage),
+              }]);
+            }
+          }
+        }
 
         // Handle tags if provided
         if (postData.tags && postData.tags.length > 0) {

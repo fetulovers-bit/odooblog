@@ -59,10 +59,28 @@ export default function EditorPage() {
     toast.success('HTML exportado!');
   };
 
-  const handlePublish = () => {
-    // In production: call edge function to publish to Odoo
-    saveDraft({ ...draft, status: 'publicado' });
-    toast.success('Post marcado como publicado!');
+  const handlePublish = async () => {
+    if (!draft) return;
+    setPublishing(true);
+    try {
+      const result = await publishToOdoo({
+        title: draft.title,
+        subtitle: draft.subtitle,
+        htmlContent: draft.htmlContent,
+        metaDescription: draft.metaDescription,
+        coverImageUrl: draft.coverImage?.url,
+        tags: draft.tags,
+        publish: true,
+      });
+      saveDraft({ ...draft, status: 'publicado' });
+      setDraft(prev => prev ? { ...prev, status: 'publicado' } : null);
+      toast.success(result.message || 'Post publicado no Odoo!');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Erro ao publicar no Odoo');
+      saveDraft({ ...draft, status: 'erro' });
+      setDraft(prev => prev ? { ...prev, status: 'erro' } : null);
+    }
+    setPublishing(false);
   };
 
   return (

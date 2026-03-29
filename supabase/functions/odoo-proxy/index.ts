@@ -13,15 +13,66 @@ interface OdooRpcParams {
   apiKey: string;
 }
 
-async function odooJsonRpc(
+interface OdooSession {
+  uid: number;
+  database: string;
+  sessionCookie: string;
+}
+
+function normalizeBaseUrl(url: string) {
+  return url.trim().replace(/\/+$/, "");
+}
+
+function extractErrorMessage(error: unknown) {
+  if (error instanceof Error) return error.message;
+  return String(error);
+}
+
+function extractSessionCookie(headers: Headers, result: unknown) {
+  const setCookie = headers.get("set-cookie");
+  const headerMatch = setCookie?.match(/session_id=[^;]+/i)?.[0];
+  if (headerMatch) return headerMatch;
+
+  if (result && typeof result === "object" && "session_id" in result) {
+    const sessionId = String((result as { session_id?: string }).session_id || "").trim();
+    if (sessionId) return `session_id=${sessionId}`;
+  }
+
+  return null;
+}
+
+async function inferDatabaseFromLoginPage(baseUrl: string): Promise<string | null> {
+  try {
+    const res = await fetch(`${normalizeBaseUrl(baseUrl)}/web/login`, {
+      method: "GET",
+      headers: { Accept: "text/html" },
+    });
+
+    if (!res.ok) return null;
+
+    const html = await res.text();
+    const inputMatch = html.match(/name=["']db["'][^>]*value=["']([^"']+)["']/i);
+    if (inputMatch?.[1]) return inputMatch[1].trim();
+
+    const jsMatch = html.match(/["']db["']\s*:\s*["']([^"']+)["']/i);
+    if (jsMatch?.[1]) return jsMatch[1].trim();
+  } catch {
+    // ignore
+  }
+
+  return null;
+}
+
+async function odooJsonRpcWithResponse(
   baseUrl: string,
   endpoint: string,
-  params: Record<string, unknown>
+  params: Record<string, unknown>,
+  extraHeaders: Record<string, string> = {}
 ) {
-  const url = `${baseUrl.replace(/\/+$/, "")}${endpoint}`;
+  const url = `${normalizeBaseUrl(baseUrl)}${endpoint}`;
   const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...extraHeaders },
     body: JSON.stringify({
       jsonrpc: "2.0",
       id: Date.now(),
@@ -29,22 +80,43 @@ async function odooJsonRpc(
       params,
     }),
   });
+
+  const text = await res.text();
+  let data: Record<string, any> | null = null;
+
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${text}`);
+      throw new Error(`Resposta inválida do Odoo: ${text}`);
+    }
+  }
+
   if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`HTTP ${res.status}: ${text}`);
+    throw new Error(`HTTP ${res.status}: ${text || res.statusText}`);
   }
-  const data = await res.json();
-  if (data.error) {
-    throw new Error(
-      data.error.data?.message || data.error.message || JSON.stringify(data.error)
-    );
+
+  if (data?.error) {
+    throw new Error(data.error.data?.message || data.error.message || JSON.stringify(data.error));
   }
-  return data.result;
+
+  return { result: data?.result, headers: res.headers };
+}
+
+async function odooJsonRpc(
+  baseUrl: string,
+  endpoint: string,
+  params: Record<string, unknown>,
+  extraHeaders: Record<string, string> = {}
+) {
+  const { result } = await odooJsonRpcWithResponse(baseUrl, endpoint, params, extraHeaders);
+  return result;
 }
 
 async function listDatabases(baseUrl: string): Promise<string[]> {
   try {
-    const res = await fetch(`${baseUrl.replace(/\/+$/, "")}/web/database/list`, {
+    const res = await fetch(`${normalizeBaseUrl(baseUrl)}/web/database/list`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "call", params: {} }),
@@ -58,7 +130,11 @@ async function listDatabases(baseUrl: string): Promise<string[]> {
 }
 
 async function resolveDatabase(p: OdooRpcParams): Promise<string> {
-  if (p.database) return p.database;
+  if (p.database?.trim()) return p.database.trim();
+
+  const loginPageDb = await inferDatabaseFromLoginPage(p.url);
+  if (loginPageDb) return loginPageDb;
+
   const dbs = await listDatabases(p.url);
   if (dbs.length === 1) return dbs[0];
   if (dbs.length > 1) {
@@ -67,22 +143,31 @@ async function resolveDatabase(p: OdooRpcParams): Promise<string> {
   throw new Error("Não foi possível detectar o banco de dados. Informe o nome manualmente nas configurações.");
 }
 
-async function authenticate(p: OdooRpcParams): Promise<number> {
+async function authenticate(p: OdooRpcParams): Promise<OdooSession> {
   const db = await resolveDatabase(p);
   p.database = db;
-  const result = await odooJsonRpc(p.url, "/web/session/authenticate", {
+  const { result, headers } = await odooJsonRpcWithResponse(p.url, "/web/session/authenticate", {
     db,
     login: p.login,
     password: p.apiKey,
   });
+
   const uid = typeof result === "object" ? result?.uid : result;
-  if (!uid || uid === false) {
+  const sessionCookie = extractSessionCookie(headers, result);
+
+  if (!uid || uid === false || !sessionCookie) {
     throw new Error("Autenticação falhou. Verifique login, API Key e nome do banco de dados.");
   }
-  return uid;
+
+  return {
+    uid: Number(uid),
+    database: db,
+    sessionCookie,
+  };
 }
 
 async function callModel(
+  session: OdooSession,
   p: OdooRpcParams,
   model: string,
   method: string,
@@ -97,6 +182,8 @@ async function callModel(
       context: { lang: "pt_BR" },
       ...kwargs,
     },
+  }, {
+    Cookie: session.sessionCookie,
   });
 }
 
@@ -131,31 +218,17 @@ serve(async (req) => {
       // ---- TEST CONNECTION ----
       case "test_connection": {
         try {
-          // Auto-detect database if not provided
-          const resolvedDb = await resolveDatabase(params);
-          params.database = resolvedDb;
+          const session = await authenticate(params);
 
-          const result = await odooJsonRpc(url, "/web/session/authenticate", {
-            db: resolvedDb,
-            login,
-            password: apiKey,
-          });
-          const uid = typeof result === "object" ? result?.uid : result;
-          if (!uid || uid === false) {
-            return new Response(
-              JSON.stringify({ success: false, error: `Credenciais inválidas para o banco "${resolvedDb}". Verifique login e API Key.` }),
-              { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-            );
-          }
           return new Response(
-            JSON.stringify({ success: true, uid, database: resolvedDb, message: `Conexão estabelecida! Banco: ${resolvedDb}` }),
+            JSON.stringify({ success: true, uid: session.uid, database: session.database, message: `Conexão estabelecida! Banco: ${session.database}` }),
             { headers: { ...corsHeaders, "Content-Type": "application/json" } }
           );
         } catch (e) {
-          const msg = e instanceof Error ? e.message : String(e);
+          const msg = extractErrorMessage(e);
           // Check if server is reachable
           try {
-            const versionRes = await fetch(`${url.replace(/\/+$/, "")}/web/webclient/version_info`, {
+            const versionRes = await fetch(`${normalizeBaseUrl(url)}/web/webclient/version_info`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "call", params: {} }),
@@ -176,40 +249,40 @@ serve(async (req) => {
 
       // ---- FETCH BLOGS ----
       case "fetch_blogs": {
-        await authenticate(params);
-        const blogs = await callModel(params, "blog.blog", "search_read", [
+        const session = await authenticate(params);
+        const blogs = await callModel(session, params, "blog.blog", "search_read", [
           [],
           ["id", "name"],
         ]);
-        return new Response(JSON.stringify({ success: true, blogs }),
+        return new Response(JSON.stringify({ success: true, blogs, database: session.database }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
 
       // ---- FETCH TAGS ----
       case "fetch_tags": {
-        await authenticate(params);
-        const tags = await callModel(params, "blog.tag", "search_read", [
+        const session = await authenticate(params);
+        const tags = await callModel(session, params, "blog.tag", "search_read", [
           [],
           ["id", "name"],
         ]);
-        return new Response(JSON.stringify({ success: true, tags }),
+        return new Response(JSON.stringify({ success: true, tags, database: session.database }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
 
       // ---- FETCH POSTS ----
       case "fetch_posts": {
-        await authenticate(params);
+        const session = await authenticate(params);
         const domain: unknown[] = [];
         if (odooConfig.blogId) {
           domain.push(["blog_id", "=", parseInt(odooConfig.blogId)]);
         }
-        const posts = await callModel(params, "blog.post", "search_read", [
+        const posts = await callModel(session, params, "blog.post", "search_read", [
           domain,
           ["id", "name", "subtitle", "website_meta_description", "tag_ids", "create_date", "write_date", "website_published", "blog_id"],
         ], { limit: 100, order: "write_date desc" });
-        return new Response(JSON.stringify({ success: true, posts }),
+        return new Response(JSON.stringify({ success: true, posts, database: session.database }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
@@ -223,7 +296,7 @@ serve(async (req) => {
           );
         }
 
-        await authenticate(params);
+        const session = await authenticate(params);
 
         const blogId = postData.blogId
           ? parseInt(postData.blogId)
@@ -267,12 +340,12 @@ serve(async (req) => {
         }
 
         // Create the post
-        const postId = await callModel(params, "blog.post", "create", [values]);
+        const postId = await callModel(session, params, "blog.post", "create", [values]);
 
         // Handle tags if provided
         if (postData.tags && postData.tags.length > 0) {
           // Search existing tags
-          const existingTags = await callModel(params, "blog.tag", "search_read", [
+          const existingTags = await callModel(session, params, "blog.tag", "search_read", [
             [["name", "in", postData.tags]],
             ["id", "name"],
           ]);
@@ -282,14 +355,14 @@ serve(async (req) => {
           // Create missing tags
           for (const tagName of postData.tags) {
             if (!existingNames.has(tagName)) {
-              const newId = await callModel(params, "blog.tag", "create", [{ name: tagName }]);
+              const newId = await callModel(session, params, "blog.tag", "create", [{ name: tagName }]);
               tagIds.push(newId as number);
             }
           }
 
           // Link tags to post
           if (tagIds.length > 0) {
-            await callModel(params, "blog.post", "write", [
+            await callModel(session, params, "blog.post", "write", [
               [postId],
               { tag_ids: [[6, 0, tagIds]] },
             ]);

@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Save, TestTube, CheckCircle, XCircle, Loader2, Eye, EyeOff, RefreshCw, List } from 'lucide-react';
+import { Save, TestTube, CheckCircle, XCircle, Loader2, Eye, EyeOff, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -12,6 +12,18 @@ import { toast } from 'sonner';
 
 interface OdooBlog { id: number; name: string; }
 interface OdooTag { id: number; name: string; }
+
+const normalizeConfig = (config: OdooConfig): OdooConfig => ({
+  ...config,
+  url: config.url.trim().replace(/\/+$/, ''),
+  database: config.database?.trim() || '',
+  login: config.login.trim(),
+  apiKey: config.apiKey.trim(),
+  blogId: config.blogId?.trim() || '',
+  websiteId: config.websiteId?.trim() || '',
+  defaultLanguage: config.defaultLanguage?.trim() || 'pt_BR',
+  defaultAuthor: config.defaultAuthor?.trim() || '',
+});
 
 export default function SettingsPage() {
   const existing = getOdooConfig();
@@ -33,21 +45,32 @@ export default function SettingsPage() {
   };
 
   const handleTest = async () => {
-    if (!config.url || !config.login || !config.apiKey) {
+    const currentConfig = normalizeConfig(config);
+
+    if (!currentConfig.url || !currentConfig.login || !currentConfig.apiKey) {
       toast.error('Preencha URL, login e API Key');
       return;
     }
+
+    setConfig(currentConfig);
     setTesting(true);
     setTestResult(null);
     setTestMessage('');
+
     try {
-      const result = await testOdooConnection(config);
+      const result = await testOdooConnection(currentConfig);
       if (result.success) {
+        const resolvedConfig = {
+          ...currentConfig,
+          database: result.database || currentConfig.database,
+        };
+
+        setConfig(resolvedConfig);
         setTestResult('success');
         setTestMessage(result.message || 'Conexão estabelecida!');
         toast.success('Conexão testada com sucesso!');
-        if (result.database && !config.database) {
-          setConfig(prev => ({ ...prev, database: result.database }));
+        if (result.database && result.database !== currentConfig.database) {
+          toast.success(`Banco detectado automaticamente: ${result.database}`);
         }
       } else {
         setTestResult('error');
@@ -64,12 +87,27 @@ export default function SettingsPage() {
   };
 
   const handleFetchBlogs = async () => {
+    const currentConfig = normalizeConfig(config);
+
+    if (!currentConfig.url || !currentConfig.login || !currentConfig.apiKey) {
+      toast.error('Preencha URL, login e API Key antes de sincronizar');
+      return;
+    }
+
     setLoadingBlogs(true);
     try {
-      const result = await fetchOdooBlogs();
+      const [result, tagsResult] = await Promise.all([
+        fetchOdooBlogs(currentConfig),
+        fetchOdooTags(currentConfig),
+      ]);
+
       setBlogs(result.blogs || []);
-      const tagsResult = await fetchOdooTags();
       setTags(tagsResult.tags || []);
+
+      if (result.database && result.database !== currentConfig.database) {
+        setConfig(prev => ({ ...prev, database: result.database }));
+      }
+
       toast.success(`${(result.blogs || []).length} blog(s) e ${(tagsResult.tags || []).length} tag(s) encontrados`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Erro ao buscar dados do Odoo');
@@ -78,11 +116,15 @@ export default function SettingsPage() {
   };
 
   const handleSave = () => {
-    if (!config.url || !config.login || !config.apiKey) {
+    const currentConfig = normalizeConfig(config);
+
+    if (!currentConfig.url || !currentConfig.login || !currentConfig.apiKey) {
       toast.error('Preencha os campos obrigatórios');
       return;
     }
-    saveOdooConfig(config);
+
+    saveOdooConfig(currentConfig);
+    setConfig(currentConfig);
     toast.success('Configurações salvas!');
   };
 
@@ -104,6 +146,9 @@ export default function SettingsPage() {
           <div>
             <Label>Banco de Dados</Label>
             <Input placeholder="meu_banco" value={config.database} onChange={e => update('database', e.target.value)} className="mt-1.5" />
+            <p className="mt-1.5 text-xs text-muted-foreground">
+              Se a detecção automática falhar, informe aqui o nome exato do banco do Odoo.
+            </p>
           </div>
           <div>
             <Label>Login / Email *</Label>
@@ -136,7 +181,7 @@ export default function SettingsPage() {
             Buscar Blogs e Tags
           </Button>
           {testResult === 'success' && <div className="flex items-center gap-1.5 text-success text-sm"><CheckCircle className="w-4 h-4" /> {testMessage}</div>}
-          {testResult === 'error' && <div className="flex items-center gap-1.5 text-destructive text-sm max-w-xs"><XCircle className="w-4 h-4 shrink-0" /> <span className="truncate">{testMessage}</span></div>}
+          {testResult === 'error' && <div className="flex items-start gap-1.5 text-destructive text-sm max-w-md"><XCircle className="w-4 h-4 shrink-0 mt-0.5" /> <span className="break-words whitespace-normal">{testMessage}</span></div>}
         </div>
       </div>
 

@@ -42,16 +42,44 @@ async function odooJsonRpc(
   return data.result;
 }
 
+async function listDatabases(baseUrl: string): Promise<string[]> {
+  try {
+    const res = await fetch(`${baseUrl.replace(/\/+$/, "")}/web/database/list`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "call", params: {} }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return data.result || [];
+    }
+  } catch { /* ignore */ }
+  return [];
+}
+
+async function resolveDatabase(p: OdooRpcParams): Promise<string> {
+  if (p.database) return p.database;
+  const dbs = await listDatabases(p.url);
+  if (dbs.length === 1) return dbs[0];
+  if (dbs.length > 1) {
+    throw new Error(`Múltiplos bancos encontrados (${dbs.join(", ")}). Informe o nome do banco nas configurações.`);
+  }
+  throw new Error("Não foi possível detectar o banco de dados. Informe o nome manualmente nas configurações.");
+}
+
 async function authenticate(p: OdooRpcParams): Promise<number> {
-  const uid = await odooJsonRpc(p.url, "/web/session/authenticate", {
-    db: p.database,
+  const db = await resolveDatabase(p);
+  p.database = db;
+  const result = await odooJsonRpc(p.url, "/web/session/authenticate", {
+    db,
     login: p.login,
     password: p.apiKey,
   });
-  if (!uid || (typeof uid === "object" && !uid.uid)) {
-    throw new Error("Autenticação falhou. Verifique login e API Key.");
+  const uid = typeof result === "object" ? result?.uid : result;
+  if (!uid || uid === false) {
+    throw new Error("Autenticação falhou. Verifique login, API Key e nome do banco de dados.");
   }
-  return typeof uid === "object" ? uid.uid : uid;
+  return uid;
 }
 
 async function callModel(

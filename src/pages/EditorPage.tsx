@@ -17,6 +17,7 @@ export default function EditorPage() {
   const navigate = useNavigate();
   const [draft, setDraft] = useState<BlogPostDraft | null>(null);
   const [viewMode, setViewMode] = useState<'preview' | 'html'>('preview');
+  const [publishing, setPublishing] = useState(false);
 
   useEffect(() => {
     if (id) {

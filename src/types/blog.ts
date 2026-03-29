@@ -47,6 +47,7 @@ export interface BlogPostDraft {
   tags: string[];
   category: string;
   cta: string;
+  authorName?: string;
   status: PostStatus;
   template?: TemplateType;
   imageStyle: ImageStyle;

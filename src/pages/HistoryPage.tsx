@@ -1,17 +1,21 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Trash2, Edit, Copy, Search, FileText } from 'lucide-react';
+import { Trash2, Edit, Copy, Search, FileText, Loader2, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { getDrafts, deleteDraft, saveDraft } from '@/lib/storage';
+import { getDrafts, deleteDraft, saveDraft, getOdooConfig } from '@/lib/storage';
 import { BlogPostDraft } from '@/types/blog';
+import { fetchOdooPosts, updateOdooPost, deleteOdooPost } from '@/lib/odoo';
 import { toast } from 'sonner';
 
 export default function HistoryPage() {
   const [drafts, setDrafts] = useState<BlogPostDraft[]>(getDrafts());
   const [search, setSearch] = useState('');
+  const [odooPosts, setOdooPosts] = useState<any[]>([]);
+  const [loadingOdoo, setLoadingOdoo] = useState(false);
+  const odooConfig = getOdooConfig();
 
   const filtered = drafts.filter(d =>
     d.title?.toLowerCase().includes(search.toLowerCase()) ||
@@ -44,6 +48,49 @@ export default function HistoryPage() {
       case 'gerado': return 'bg-primary/10 text-primary';
       case 'erro': return 'bg-destructive/10 text-destructive';
       default: return 'bg-muted text-muted-foreground';
+    }
+  };
+
+  const loadOdooPosts = async () => {
+    if (!odooConfig) return;
+    setLoadingOdoo(true);
+    try {
+      const result = await fetchOdooPosts(odooConfig);
+      setOdooPosts(result.posts || []);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Erro ao carregar posts do Odoo');
+    }
+    setLoadingOdoo(false);
+  };
+
+  useEffect(() => {
+    loadOdooPosts();
+  }, []);
+
+  const handleEditOdooPost = async (post: any) => {
+    if (!odooConfig) return;
+    const title = prompt('Novo título do post', post.name || '');
+    if (title === null) return;
+    const subtitle = prompt('Novo subtítulo do post', post.subtitle || '');
+    if (subtitle === null) return;
+    try {
+      await updateOdooPost(post.id, { title, subtitle }, odooConfig);
+      toast.success('Post do Odoo atualizado');
+      loadOdooPosts();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Erro ao atualizar post');
+    }
+  };
+
+  const handleDeleteOdooPost = async (post: any) => {
+    if (!odooConfig) return;
+    if (!confirm(`Excluir o post "${post.name}" do Odoo?`)) return;
+    try {
+      await deleteOdooPost(post.id, odooConfig);
+      toast.success('Post do Odoo excluído');
+      loadOdooPosts();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Erro ao excluir post');
     }
   };
 
@@ -96,6 +143,34 @@ export default function HistoryPage() {
           ))}
         </div>
       )}
+
+      <div className="space-y-3 pt-4 border-t border-border">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-display font-semibold text-foreground">Posts Totais no Odoo</h2>
+          <Button size="sm" variant="outline" onClick={loadOdooPosts} className="gap-1.5">
+            {loadingOdoo ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+            Atualizar
+          </Button>
+        </div>
+        {!odooConfig && <p className="text-sm text-muted-foreground">Configure o Odoo para visualizar os posts remotos.</p>}
+        {odooConfig && (
+          <div className="space-y-2">
+            {odooPosts.map(post => (
+              <div key={post.id} className="flex items-center justify-between p-4 rounded-xl border border-border bg-card">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-foreground truncate">{post.name}</p>
+                  <p className="text-xs text-muted-foreground">{new Date(post.write_date || post.create_date).toLocaleDateString('pt-BR')}</p>
+                </div>
+                <div className="flex items-center gap-1">
+                  <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => handleEditOdooPost(post)}><Edit className="w-3.5 h-3.5" /></Button>
+                  <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive" onClick={() => handleDeleteOdooPost(post)}><Trash2 className="w-3.5 h-3.5" /></Button>
+                </div>
+              </div>
+            ))}
+            {odooPosts.length === 0 && !loadingOdoo && <p className="text-sm text-muted-foreground">Nenhum post encontrado no Odoo.</p>}
+          </div>
+        )}
+      </div>
     </motion.div>
   );
 }

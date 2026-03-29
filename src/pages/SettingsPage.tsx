@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { OdooConfig } from '@/types/blog';
 import { getOdooConfig, saveOdooConfig } from '@/lib/storage';
-import { testOdooConnection, fetchOdooBlogs, fetchOdooTags, syncOdooPostCovers } from '@/lib/odoo';
+import { testOdooConnection, fetchOdooBlogs, fetchOdooTags, syncOdooPostCovers, applyAuthorToAllOdooPosts } from '@/lib/odoo';
 import { toast } from 'sonner';
 
 interface OdooBlog { id: number; name: string; }
@@ -39,6 +39,7 @@ export default function SettingsPage() {
   const [tags, setTags] = useState<OdooTag[]>([]);
   const [loadingBlogs, setLoadingBlogs] = useState(false);
   const [syncingCovers, setSyncingCovers] = useState(false);
+  const [applyingAuthor, setApplyingAuthor] = useState(false);
 
   const update = (field: keyof OdooConfig, value: string) => {
     setConfig(prev => ({ ...prev, [field]: value }));
@@ -147,6 +148,22 @@ export default function SettingsPage() {
     setSyncingCovers(false);
   };
 
+  const handleApplyAuthor = async () => {
+    const currentConfig = normalizeConfig(config);
+    if (!currentConfig.defaultAuthor) {
+      toast.error('Informe um autor padrão antes de aplicar em lote');
+      return;
+    }
+    setApplyingAuthor(true);
+    try {
+      const result = await applyAuthorToAllOdooPosts(currentConfig.defaultAuthor, currentConfig);
+      toast.success(result.message || 'Autor aplicado em lote com sucesso');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Erro ao aplicar autor em lote');
+    }
+    setApplyingAuthor(false);
+  };
+
   return (
     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="max-w-2xl space-y-6">
       <div>
@@ -202,6 +219,10 @@ export default function SettingsPage() {
           <Button onClick={handleSyncCovers} disabled={syncingCovers || testResult !== 'success'} variant="outline" className="gap-2">
             {syncingCovers ? <Loader2 className="w-4 h-4 animate-spin" /> : <Image className="w-4 h-4" />}
             Sincronizar Capas
+          </Button>
+          <Button onClick={handleApplyAuthor} disabled={applyingAuthor || testResult !== 'success'} variant="outline" className="gap-2">
+            {applyingAuthor ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+            Aplicar Autor em Todos
           </Button>
           {testResult === 'success' && <div className="flex items-center gap-1.5 text-success text-sm"><CheckCircle className="w-4 h-4" /> {testMessage}</div>}
           {testResult === 'error' && <div className="flex items-start gap-1.5 text-destructive text-sm max-w-md"><XCircle className="w-4 h-4 shrink-0 mt-0.5" /> <span className="break-words whitespace-normal">{testMessage}</span></div>}

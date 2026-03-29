@@ -52,6 +52,15 @@ function extractFirstImageSrc(html: string): string | null {
   return null;
 }
 
+function buildCoverProperties(imageUrlOrDataUrl: string) {
+  return JSON.stringify({
+    "background-image": `url('${imageUrlOrDataUrl}')`,
+    background_image: imageUrlOrDataUrl,
+    resize_class: "cover_mid",
+    opacity: "0",
+  });
+}
+
 interface OdooSession {
   uid: number;
   database: string;
@@ -233,6 +242,20 @@ async function callModel(
   });
 }
 
+async function resolveOrCreateAuthorId(session: OdooSession, p: OdooRpcParams, authorName: string): Promise<number | null> {
+  const normalized = authorName?.trim();
+  if (!normalized) return null;
+
+  const partners = await callModel(session, p, "res.partner", "search_read", [
+    [["name", "=", normalized]],
+    ["id", "name"],
+  ], { limit: 1 }) as Array<{ id: number; name: string }>;
+
+  if (partners.length > 0) return partners[0].id;
+  const newId = await callModel(session, p, "res.partner", "create", [{ name: normalized }]);
+  return Number(newId);
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS")
     return new Response(null, { headers: corsHeaders });
@@ -401,18 +424,16 @@ serve(async (req) => {
 
             if (base64) {
               const dataImage = `data:${mimeType};base64,${base64}`;
-              values.cover_properties = JSON.stringify({
-                // Odoo website cover parser expects CSS-style keys.
-                "background-image": `url('${dataImage}')`,
-                // Keep legacy key for compatibility with older custom themes/parsers.
-                background_image: dataImage,
-                resize_class: "cover_mid",
-                opacity: "0",
-              });
+              values.cover_properties = buildCoverProperties(dataImage);
             }
           } catch (e) {
             console.error("Failed to download cover image:", e);
           }
+        }
+
+        if (postData.authorName) {
+          const authorId = await resolveOrCreateAuthorId(session, params, postData.authorName);
+          if (authorId) values.author_id = authorId;
         }
 
         // Create the post
@@ -495,12 +516,7 @@ serve(async (req) => {
           }
 
           await callModel(session, params, "blog.post", "write", [[postId], {
-            cover_properties: JSON.stringify({
-              "background-image": `url('${firstImage}')`,
-              background_image: firstImage,
-              resize_class: "cover_mid",
-              opacity: "0",
-            }),
+            cover_properties: buildCoverProperties(firstImage),
           }]);
           updated++;
         }
@@ -516,6 +532,79 @@ serve(async (req) => {
           }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
+      }
+
+      // ---- UPDATE EXISTING POST ----
+      case "update_post": {
+        const session = await authenticate(params);
+        const { postId, values } = body as { postId?: number; values?: Record<string, unknown> };
+        if (!postId || !values) {
+          return new Response(JSON.stringify({ error: "postId and values are required" }), {
+            status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        const payload: Record<string, unknown> = {};
+        if (typeof values.title === "string") payload.name = values.title;
+        if (typeof values.subtitle === "string") payload.subtitle = values.subtitle;
+        if (typeof values.metaDescription === "string") payload.website_meta_description = values.metaDescription;
+        if (typeof values.htmlContent === "string") payload.content = values.htmlContent;
+
+        await callModel(session, params, "blog.post", "write", [[postId], payload]);
+        return new Response(JSON.stringify({ success: true, message: "Post atualizado com sucesso" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      // ---- DELETE EXISTING POST ----
+      case "delete_post": {
+        const session = await authenticate(params);
+        const { postId } = body as { postId?: number };
+        if (!postId) {
+          return new Response(JSON.stringify({ error: "postId is required" }), {
+            status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        await callModel(session, params, "blog.post", "unlink", [[postId]]);
+        return new Response(JSON.stringify({ success: true, message: "Post excluído com sucesso" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      // ---- APPLY AUTHOR TO ALL POSTS ----
+      case "apply_author_to_all_posts": {
+        const session = await authenticate(params);
+        const { authorName } = body as { authorName?: string };
+        if (!authorName?.trim()) {
+          return new Response(JSON.stringify({ error: "authorName is required" }), {
+            status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        const authorId = await resolveOrCreateAuthorId(session, params, authorName);
+        if (!authorId) {
+          return new Response(JSON.stringify({ error: "Não foi possível resolver o autor" }), {
+            status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        const domain: unknown[] = [];
+        if (odooConfig.blogId) {
+          domain.push(["blog_id", "=", parseInt(odooConfig.blogId)]);
+        }
+        const postIds = await callModel(session, params, "blog.post", "search", [domain]) as number[];
+        if (postIds.length > 0) {
+          await callModel(session, params, "blog.post", "write", [postIds, { author_id: authorId }]);
+        }
+
+        return new Response(JSON.stringify({
+          success: true,
+          updated: postIds.length,
+          message: `Autor aplicado em ${postIds.length} post(s).`,
+        }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
       }
 
       default:

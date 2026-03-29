@@ -70,6 +70,7 @@ export default function EditorPage() {
         metaDescription: draft.metaDescription,
         coverImageUrl: draft.coverImage?.url,
         coverImageDataUrl: draft.coverImage?.dataUrl,
+        authorName: draft.authorName,
         tags: draft.tags,
         publish: true,
       });
@@ -129,6 +130,10 @@ export default function EditorPage() {
                 <Label className="text-xs text-muted-foreground">Meta Descrição</Label>
                 <Input value={draft.metaDescription} onChange={e => updateField('metaDescription', e.target.value)} className="mt-1" />
               </div>
+            </div>
+            <div>
+              <Label className="text-xs text-muted-foreground">Autor</Label>
+              <Input value={draft.authorName || ''} onChange={e => updateField('authorName', e.target.value)} className="mt-1" />
             </div>
           </div>
 

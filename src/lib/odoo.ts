@@ -60,6 +60,22 @@ export async function syncOdooPostCovers(config?: OdooConfig) {
   return callProxy("sync_post_covers", {}, config);
 }
 
+export async function updateOdooPost(
+  postId: number,
+  values: { title?: string; subtitle?: string; metaDescription?: string; htmlContent?: string },
+  config?: OdooConfig
+) {
+  return callProxy("update_post", { postId, values }, config);
+}
+
+export async function deleteOdooPost(postId: number, config?: OdooConfig) {
+  return callProxy("delete_post", { postId }, config);
+}
+
+export async function applyAuthorToAllOdooPosts(authorName: string, config?: OdooConfig) {
+  return callProxy("apply_author_to_all_posts", { authorName }, config);
+}
+
 export interface PublishPostData {
   title: string;
   subtitle?: string;
@@ -67,6 +83,7 @@ export interface PublishPostData {
   metaDescription?: string;
   coverImageUrl?: string;
   coverImageDataUrl?: string;
+  authorName?: string;
   tags?: string[];
   blogId?: string;
   publish?: boolean;

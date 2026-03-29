@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { GenerationBriefing, BlogPostDraft, GenerationStep, ToneOfVoice, ArticleLength, ImageStyle, TemplateType } from '@/types/blog';
-import { saveDraft } from '@/lib/storage';
+import { saveDraft, getOdooConfig } from '@/lib/storage';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 
@@ -59,8 +59,10 @@ const initialSteps: GenerationStep[] = [
 export default function NewPostPage() {
   const navigate = useNavigate();
   const [briefing, setBriefing] = useState<GenerationBriefing>(defaultBriefing);
+  const [batchCount, setBatchCount] = useState(1);
   const [generating, setGenerating] = useState(false);
   const [steps, setSteps] = useState<GenerationStep[]>(initialSteps);
+  const defaultAuthor = getOdooConfig()?.defaultAuthor || '';
 
   const updateField = <K extends keyof GenerationBriefing>(field: K, value: GenerationBriefing[K]) => {
     setBriefing(prev => ({ ...prev, [field]: value }));
@@ -84,19 +86,24 @@ export default function NewPostPage() {
     setSteps(initialSteps);
 
     try {
-      const draftId = crypto.randomUUID();
+      const total = Math.max(1, Math.min(50, batchCount));
+      const createdDraftIds: string[] = [];
 
-      // Step 1: Generate content
-      updateStep('briefing', 'active');
-      
-      const { data, error } = await supabase.functions.invoke('generate-blog-post', {
-        body: { briefing },
-      });
+      for (let postIndex = 0; postIndex < total; postIndex++) {
+        const draftId = crypto.randomUUID();
+        const topicVariation = total > 1
+          ? `${briefing.topic} (variação ${postIndex + 1} com abordagem única)`
+          : briefing.topic;
 
-      if (error) throw error;
+        // Step 1: Generate content
+        updateStep('briefing', 'active');
+        const { data, error } = await supabase.functions.invoke('generate-blog-post', {
+          body: { briefing: { ...briefing, topic: topicVariation } },
+        });
 
-      updateStep('briefing', 'done');
-      updateStep('content', 'done');
+        if (error) throw error;
+        updateStep('briefing', 'done');
+        updateStep('content', 'done');
 
       // Step 2: Generate cover image
       updateStep('cover', 'active');
@@ -174,33 +181,36 @@ export default function NewPostPage() {
         });
       }
 
-      const draft: BlogPostDraft = {
-        id: draftId,
-        ...briefing,
-        secondaryKeywords: briefing.secondaryKeywords.split(',').map(s => s.trim()).filter(Boolean),
-        title: data.title || `Artigo sobre ${briefing.topic}`,
-        subtitle: data.subtitle || '',
-        slug: data.slug || briefing.topic.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, ''),
-        metaDescription: data.metaDescription || '',
-        excerpt: data.excerpt || '',
-        htmlContent,
-        coverImage,
-        internalImages,
-        tags: data.tags || [],
-        cta: briefing.cta || data.cta || '',
-        status: 'gerado',
-        template: briefing.template,
-        imageStyle: briefing.imageStyle,
-        internalImageCount: briefing.internalImageCount,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
+        const draft: BlogPostDraft = {
+          id: draftId,
+          ...briefing,
+          topic: topicVariation,
+          secondaryKeywords: briefing.secondaryKeywords.split(',').map(s => s.trim()).filter(Boolean),
+          title: data.title || `Artigo sobre ${topicVariation}`,
+          subtitle: data.subtitle || '',
+          slug: data.slug || topicVariation.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, ''),
+          metaDescription: data.metaDescription || '',
+          excerpt: data.excerpt || '',
+          htmlContent,
+          coverImage,
+          internalImages,
+          tags: data.tags || [],
+          cta: briefing.cta || data.cta || '',
+          authorName: defaultAuthor,
+          status: 'gerado',
+          template: briefing.template,
+          imageStyle: briefing.imageStyle,
+          internalImageCount: briefing.internalImageCount,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
 
-      saveDraft(draft);
+        saveDraft(draft);
+        createdDraftIds.push(draft.id);
+      }
       updateStep('finalizing', 'done');
-      toast.success('Artigo gerado com sucesso!');
-      
-      setTimeout(() => navigate(`/editor/${draft.id}`), 500);
+      toast.success(`${createdDraftIds.length} artigo(s) gerado(s) com sucesso!`);
+      setTimeout(() => navigate(createdDraftIds.length > 1 ? '/history' : `/editor/${createdDraftIds[0]}`), 500);
     } catch (err: any) {
       console.error('Generation error:', err);
       toast.error('Erro ao gerar artigo. Tente novamente.');
@@ -260,6 +270,10 @@ export default function NewPostPage() {
             <div>
               <Label>Palavra-chave Principal *</Label>
               <Input placeholder="automação de marketing" value={briefing.primaryKeyword} onChange={e => updateField('primaryKeyword', e.target.value)} className="mt-1.5" />
+            </div>
+            <div>
+              <Label>Quantidade de Posts (1-50)</Label>
+              <Input type="number" min={1} max={50} value={batchCount} onChange={e => setBatchCount(Number(e.target.value || 1))} className="mt-1.5" />
             </div>
             <div>
               <Label>Palavras-chave Secundárias</Label>

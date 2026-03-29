@@ -130,27 +130,30 @@ serve(async (req) => {
     switch (action) {
       // ---- TEST CONNECTION ----
       case "test_connection": {
-        // Try to authenticate via session
         try {
+          // Auto-detect database if not provided
+          const resolvedDb = await resolveDatabase(params);
+          params.database = resolvedDb;
+
           const result = await odooJsonRpc(url, "/web/session/authenticate", {
-            db: dbName,
+            db: resolvedDb,
             login,
             password: apiKey,
           });
           const uid = typeof result === "object" ? result?.uid : result;
           if (!uid || uid === false) {
             return new Response(
-              JSON.stringify({ success: false, error: "Credenciais inválidas. Verifique login e API Key." }),
+              JSON.stringify({ success: false, error: `Credenciais inválidas para o banco "${resolvedDb}". Verifique login e API Key.` }),
               { headers: { ...corsHeaders, "Content-Type": "application/json" } }
             );
           }
           return new Response(
-            JSON.stringify({ success: true, uid, message: "Conexão estabelecida com sucesso!" }),
+            JSON.stringify({ success: true, uid, database: resolvedDb, message: `Conexão estabelecida! Banco: ${resolvedDb}` }),
             { headers: { ...corsHeaders, "Content-Type": "application/json" } }
           );
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
-          // Try alternative: version_info endpoint
+          // Check if server is reachable
           try {
             const versionRes = await fetch(`${url.replace(/\/+$/, "")}/web/webclient/version_info`, {
               method: "POST",
@@ -159,13 +162,13 @@ serve(async (req) => {
             });
             if (versionRes.ok) {
               return new Response(
-                JSON.stringify({ success: false, error: `Servidor Odoo encontrado, mas autenticação falhou: ${msg}` }),
+                JSON.stringify({ success: false, error: `Servidor encontrado, mas: ${msg}` }),
                 { headers: { ...corsHeaders, "Content-Type": "application/json" } }
               );
             }
           } catch { /* ignore */ }
           return new Response(
-            JSON.stringify({ success: false, error: `Não foi possível conectar ao Odoo: ${msg}` }),
+            JSON.stringify({ success: false, error: `Não foi possível conectar: ${msg}` }),
             { headers: { ...corsHeaders, "Content-Type": "application/json" } }
           );
         }

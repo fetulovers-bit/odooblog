@@ -84,6 +84,8 @@ export default function NewPostPage() {
     setSteps(initialSteps);
 
     try {
+      const draftId = crypto.randomUUID();
+
       // Step 1: Generate content
       updateStep('briefing', 'active');
       
@@ -95,12 +97,84 @@ export default function NewPostPage() {
 
       updateStep('briefing', 'done');
       updateStep('content', 'done');
-      updateStep('cover', 'done');
-      updateStep('images', 'done');
+
+      // Step 2: Generate cover image
+      updateStep('cover', 'active');
+      let coverImage: BlogPostDraft['coverImage'] = undefined;
+      try {
+        const coverPrompt = data.coverImagePrompt || `Professional ${briefing.imageStyle} blog cover image about ${briefing.topic}, horizontal, no text, premium quality`;
+        const { data: coverData, error: coverError } = await supabase.functions.invoke('generate-blog-image', {
+          body: { prompt: coverPrompt, filename: `${draftId}/cover` },
+        });
+        if (!coverError && coverData?.url) {
+          coverImage = {
+            id: crypto.randomUUID(),
+            type: 'cover' as const,
+            prompt: coverPrompt,
+            url: coverData.url,
+            sectionReference: 'cover',
+            altText: data.title || briefing.topic,
+          };
+        }
+      } catch (imgErr) {
+        console.warn('Cover image generation failed:', imgErr);
+      }
+      updateStep('cover', coverImage ? 'done' : 'error');
+
+      // Step 3: Generate internal images
+      updateStep('images', 'active');
+      const internalImages: BlogPostDraft['internalImages'] = [];
+      const imagePrompts = data.internalImagePrompts || [];
+      const count = Math.min(imagePrompts.length, briefing.internalImageCount);
+      
+      for (let i = 0; i < count; i++) {
+        try {
+          const imgInfo = imagePrompts[i];
+          const prompt = typeof imgInfo === 'string' ? imgInfo : imgInfo.prompt;
+          const altText = typeof imgInfo === 'string' ? `Imagem ${i + 1}` : (imgInfo.altText || `Imagem ${i + 1}`);
+          const sectionRef = typeof imgInfo === 'string' ? `section-${i + 1}` : (imgInfo.sectionReference || `section-${i + 1}`);
+
+          const { data: imgData, error: imgError } = await supabase.functions.invoke('generate-blog-image', {
+            body: { prompt: `${prompt}, ${briefing.imageStyle} style, professional, no text`, filename: `${draftId}/internal-${i}` },
+          });
+
+          if (!imgError && imgData?.url) {
+            internalImages.push({
+              id: crypto.randomUUID(),
+              type: 'internal',
+              prompt,
+              url: imgData.url,
+              sectionReference: sectionRef,
+              altText,
+            });
+          }
+        } catch (imgErr) {
+          console.warn(`Internal image ${i} generation failed:`, imgErr);
+        }
+      }
+      updateStep('images', internalImages.length > 0 ? 'done' : 'error');
+
+      // Step 4: Finalize
       updateStep('finalizing', 'active');
 
+      // Insert images into HTML content
+      let htmlContent = data.htmlContent || '<p>Conteúdo gerado</p>';
+      if (internalImages.length > 0) {
+        // Find h2 tags and insert images after them
+        const h2Regex = /<\/h2>/g;
+        let h2Index = 0;
+        htmlContent = htmlContent.replace(h2Regex, (match: string) => {
+          if (h2Index < internalImages.length) {
+            const img = internalImages[h2Index];
+            h2Index++;
+            return `${match}\n<figure><img src="${img.url}" alt="${img.altText}" style="width:100%;border-radius:8px;margin:16px 0" /><figcaption>${img.altText}</figcaption></figure>`;
+          }
+          return match;
+        });
+      }
+
       const draft: BlogPostDraft = {
-        id: crypto.randomUUID(),
+        id: draftId,
         ...briefing,
         secondaryKeywords: briefing.secondaryKeywords.split(',').map(s => s.trim()).filter(Boolean),
         title: data.title || `Artigo sobre ${briefing.topic}`,
@@ -108,9 +182,9 @@ export default function NewPostPage() {
         slug: data.slug || briefing.topic.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, ''),
         metaDescription: data.metaDescription || '',
         excerpt: data.excerpt || '',
-        htmlContent: data.htmlContent || '<p>Conteúdo gerado</p>',
-        coverImage: data.coverImage,
-        internalImages: data.internalImages || [],
+        htmlContent,
+        coverImage,
+        internalImages,
         tags: data.tags || [],
         cta: briefing.cta || data.cta || '',
         status: 'gerado',

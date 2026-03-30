@@ -151,7 +151,12 @@ export default function NewPostPage() {
             body: { prompt: `${prompt}, ${briefing.imageStyle} style, professional, no text`, filename: `${draftId}/internal-${i}` },
           });
 
-          if (!imgError && imgData?.url) {
+          if (imgError) {
+            console.warn(`Internal image ${i} error:`, imgError);
+            continue;
+          }
+
+          if (imgData?.url) {
             internalImages.push({
               id: crypto.randomUUID(),
               type: 'internal',

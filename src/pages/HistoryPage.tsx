@@ -134,7 +134,12 @@ export default function HistoryPage() {
       ) : (
         <div className="space-y-2">
           {filtered.map(d => (
-            <div key={d.id} className="flex items-center justify-between p-4 rounded-xl border border-border bg-card shadow-card hover:shadow-elevated transition-shadow">
+            <div key={d.id} className="flex items-center gap-4 p-4 rounded-xl border border-border bg-card shadow-card hover:shadow-elevated transition-shadow">
+              {d.coverImage?.url && (
+                <Link to={`/editor/${d.id}`} className="shrink-0">
+                  <img src={d.coverImage.url} alt={d.coverImage.altText || d.title} className="w-16 h-16 rounded-lg object-cover" />
+                </Link>
+              )}
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2 flex-wrap">
                   <Link to={`/editor/${d.id}`} className="text-sm font-medium text-foreground hover:text-primary transition-colors truncate">

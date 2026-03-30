@@ -18,12 +18,19 @@ export function getDrafts(): BlogPostDraft[] {
 }
 
 export function saveDraft(draft: BlogPostDraft) {
+  // Strip large dataUrl fields to avoid localStorage quota issues
+  const cleanDraft = {
+    ...draft,
+    updatedAt: new Date().toISOString(),
+    coverImage: draft.coverImage ? { ...draft.coverImage, dataUrl: undefined } : undefined,
+    internalImages: draft.internalImages.map(img => ({ ...img, dataUrl: undefined })),
+  };
   const drafts = getDrafts();
-  const idx = drafts.findIndex(d => d.id === draft.id);
+  const idx = drafts.findIndex(d => d.id === cleanDraft.id);
   if (idx >= 0) {
-    drafts[idx] = { ...draft, updatedAt: new Date().toISOString() };
+    drafts[idx] = cleanDraft;
   } else {
-    drafts.unshift(draft);
+    drafts.unshift(cleanDraft);
   }
   localStorage.setItem(DRAFTS_KEY, JSON.stringify(drafts));
 }

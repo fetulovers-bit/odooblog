@@ -119,7 +119,6 @@ export default function NewPostPage() {
             type: 'cover' as const,
             prompt: coverPrompt,
             url: coverData.url,
-            dataUrl: coverData.dataUrl,
             sectionReference: 'cover',
             altText: data.title || briefing.topic,
           };

@@ -11,6 +11,7 @@ import { BlogPostDraft } from '@/types/blog';
 import { getDraft, saveDraft } from '@/lib/storage';
 import { publishToOdoo } from '@/lib/odoo';
 import { toast } from 'sonner';
+import { supabase } from '@/integrations/supabase/client';
 
 export default function EditorPage() {
   const { id } = useParams<{ id: string }>();

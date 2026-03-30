@@ -85,23 +85,49 @@ export default function EditorPage() {
     setPublishing(false);
   };
 
-  const handleCoverUpload = (file?: File) => {
+  const handleCoverUpload = async (file?: File) => {
     if (!file || !draft) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = String(reader.result || '');
+    try {
+      const reader = new FileReader();
+      const dataUrl = await new Promise<string>((resolve) => {
+        reader.onload = () => resolve(String(reader.result || ''));
+        reader.readAsDataURL(file);
+      });
+
+      // Upload to storage via edge function
+      const { data: imgData, error } = await supabase.functions.invoke('generate-blog-image', {
+        body: { prompt: '', filename: `${draft.id}/cover-upload` },
+      });
+
+      // Use storage URL if upload worked, otherwise fall back to dataUrl
+      const url = (!error && imgData?.url) ? imgData.url : dataUrl;
+
       updateField('coverImage', {
         id: draft.coverImage?.id || crypto.randomUUID(),
         type: 'cover',
         prompt: draft.coverImage?.prompt || `Capa para ${draft.title}`,
-        url: dataUrl,
-        dataUrl,
+        url,
         sectionReference: 'cover',
         altText: draft.coverImage?.altText || draft.title,
       });
+      toast.success('Imagem de capa atualizada!');
+    } catch {
+      // Fallback: just use local dataUrl
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = String(reader.result || '');
+        updateField('coverImage', {
+          id: draft.coverImage?.id || crypto.randomUUID(),
+          type: 'cover',
+          prompt: draft.coverImage?.prompt || `Capa para ${draft.title}`,
+          url: dataUrl,
+          sectionReference: 'cover',
+          altText: draft.coverImage?.altText || draft.title,
+        });
+      };
+      reader.readAsDataURL(file);
       toast.success('Imagem de capa atualizada no rascunho');
-    };
-    reader.readAsDataURL(file);
+    }
   };
 
   return (

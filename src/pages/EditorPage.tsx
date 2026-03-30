@@ -88,47 +88,40 @@ export default function EditorPage() {
 
   const handleCoverUpload = async (file?: File) => {
     if (!file || !draft) return;
-    try {
-      const reader = new FileReader();
-      const dataUrl = await new Promise<string>((resolve) => {
-        reader.onload = () => resolve(String(reader.result || ''));
-        reader.readAsDataURL(file);
-      });
-
-      // Upload to storage via edge function
-      const { data: imgData, error } = await supabase.functions.invoke('generate-blog-image', {
-        body: { prompt: '', filename: `${draft.id}/cover-upload` },
-      });
-
-      // Use storage URL if upload worked, otherwise fall back to dataUrl
-      const url = (!error && imgData?.url) ? imgData.url : dataUrl;
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const dataUrl = String(reader.result || '');
+      
+      // Try uploading to Supabase Storage directly
+      let finalUrl = dataUrl;
+      try {
+        const ext = file.name.split('.').pop() || 'png';
+        const filePath = `${draft.id}/cover-upload.${ext}`;
+        const { error: uploadError } = await supabase.storage
+          .from('blog-images')
+          .upload(filePath, file, { contentType: file.type, upsert: true });
+        
+        if (!uploadError) {
+          const { data: urlData } = supabase.storage
+            .from('blog-images')
+            .getPublicUrl(filePath);
+          finalUrl = urlData.publicUrl;
+        }
+      } catch {
+        // fallback to dataUrl
+      }
 
       updateField('coverImage', {
         id: draft.coverImage?.id || crypto.randomUUID(),
         type: 'cover',
         prompt: draft.coverImage?.prompt || `Capa para ${draft.title}`,
-        url,
+        url: finalUrl,
         sectionReference: 'cover',
         altText: draft.coverImage?.altText || draft.title,
       });
       toast.success('Imagem de capa atualizada!');
-    } catch {
-      // Fallback: just use local dataUrl
-      const reader = new FileReader();
-      reader.onload = () => {
-        const dataUrl = String(reader.result || '');
-        updateField('coverImage', {
-          id: draft.coverImage?.id || crypto.randomUUID(),
-          type: 'cover',
-          prompt: draft.coverImage?.prompt || `Capa para ${draft.title}`,
-          url: dataUrl,
-          sectionReference: 'cover',
-          altText: draft.coverImage?.altText || draft.title,
-        });
-      };
-      reader.readAsDataURL(file);
-      toast.success('Imagem de capa atualizada no rascunho');
-    }
+    };
+    reader.readAsDataURL(file);
   };
 
   return (

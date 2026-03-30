@@ -113,7 +113,12 @@ export default function NewPostPage() {
         const { data: coverData, error: coverError } = await supabase.functions.invoke('generate-blog-image', {
           body: { prompt: coverPrompt, filename: `${draftId}/cover` },
         });
-        if (!coverError && coverData?.url) {
+        if (coverError) {
+          const errBody = typeof coverError === 'object' && coverError !== null ? (coverError as any).message || JSON.stringify(coverError) : String(coverError);
+          console.warn('Cover image error:', errBody);
+          toast.warning('Imagem de capa não gerada: ' + (errBody.includes('402') || errBody.includes('créditos') ? 'créditos insuficientes' : errBody.includes('429') ? 'rate limit, tente novamente' : 'falha na geração'));
+        }
+        if (coverData?.url) {
           coverImage = {
             id: crypto.randomUUID(),
             type: 'cover' as const,
@@ -125,6 +130,7 @@ export default function NewPostPage() {
         }
       } catch (imgErr) {
         console.warn('Cover image generation failed:', imgErr);
+        toast.warning('Falha ao gerar imagem de capa');
       }
       updateStep('cover', coverImage ? 'done' : 'error');
 
@@ -145,7 +151,12 @@ export default function NewPostPage() {
             body: { prompt: `${prompt}, ${briefing.imageStyle} style, professional, no text`, filename: `${draftId}/internal-${i}` },
           });
 
-          if (!imgError && imgData?.url) {
+          if (imgError) {
+            console.warn(`Internal image ${i} error:`, imgError);
+            continue;
+          }
+
+          if (imgData?.url) {
             internalImages.push({
               id: crypto.randomUUID(),
               type: 'internal',

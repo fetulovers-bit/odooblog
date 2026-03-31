@@ -9,6 +9,7 @@ import { getDrafts, deleteDraft, saveDraft, getOdooConfig } from '@/lib/storage'
 import { BlogPostDraft } from '@/types/blog';
 import { fetchOdooPosts, updateOdooPost, deleteOdooPost, updateOdooPostCover } from '@/lib/odoo';
 import { toast } from 'sonner';
+import { ensureBlogImageUrl } from '@/lib/storageImage';
 
 export default function HistoryPage() {
   const [drafts, setDrafts] = useState<BlogPostDraft[]>(getDrafts());
@@ -65,6 +66,34 @@ export default function HistoryPage() {
 
   useEffect(() => {
     loadOdooPosts();
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    const refreshCoverUrls = async () => {
+      const currentDrafts = getDrafts();
+      const updatedDrafts = await Promise.all(
+        currentDrafts.map(async (draft) => {
+          if (!draft.coverImage?.url) return draft;
+          const currentUrl = draft.coverImage.url;
+          const bestUrl = await ensureBlogImageUrl(currentUrl, draft.coverImage?.filePath).catch(() => currentUrl);
+          if (bestUrl === draft.coverImage.url) return draft;
+          const updated = {
+            ...draft,
+            coverImage: { ...draft.coverImage, url: bestUrl },
+          };
+          saveDraft(updated);
+          return updated;
+        }),
+      );
+
+      if (active) setDrafts(updatedDrafts);
+    };
+
+    refreshCoverUrls();
+    return () => {
+      active = false;
+    };
   }, []);
 
   const handleEditOdooPost = async (post: any) => {

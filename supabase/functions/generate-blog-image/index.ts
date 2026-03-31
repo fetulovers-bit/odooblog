@@ -85,11 +85,21 @@ serve(async (req) => {
       throw new Error("Failed to upload image");
     }
 
-    const { data: urlData } = supabase.storage
+    let finalUrl: string | null = null;
+    const { data: signedData, error: signedError } = await supabase.storage
       .from("blog-images")
-      .getPublicUrl(filePath);
+      .createSignedUrl(filePath, 60 * 60 * 24 * 365);
 
-    return new Response(JSON.stringify({ url: urlData.publicUrl, dataUrl: imageData }), {
+    if (!signedError && signedData?.signedUrl) {
+      finalUrl = signedData.signedUrl;
+    } else {
+      const { data: urlData } = supabase.storage
+        .from("blog-images")
+        .getPublicUrl(filePath);
+      finalUrl = urlData.publicUrl;
+    }
+
+    return new Response(JSON.stringify({ url: finalUrl, dataUrl: imageData, filePath }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {

@@ -12,6 +12,7 @@ import { getDraft, saveDraft } from '@/lib/storage';
 import { publishToOdoo } from '@/lib/odoo';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
+import { ensureBlogImageUrl, getBestBlogImageUrl } from '@/lib/storageImage';
 
 export default function EditorPage() {
   const { id } = useParams<{ id: string }>();
@@ -23,7 +24,23 @@ export default function EditorPage() {
   useEffect(() => {
     if (id) {
       const found = getDraft(id);
-      if (found) setDraft(found);
+      if (found) {
+        setDraft(found);
+        if (found.coverImage?.url) {
+          ensureBlogImageUrl(found.coverImage.url, found.coverImage.filePath).then((bestUrl) => {
+            if (bestUrl !== found.coverImage?.url) {
+              const updated = {
+                ...found,
+                coverImage: found.coverImage ? { ...found.coverImage, url: bestUrl } : undefined,
+              };
+              setDraft(updated);
+              saveDraft(updated);
+            }
+          }).catch(() => {
+            // keep original url
+          });
+        }
+      }
       else {
         toast.error('Post não encontrado');
         navigate('/history');
@@ -94,18 +111,15 @@ export default function EditorPage() {
       
       // Try uploading to Supabase Storage directly
       let finalUrl = dataUrl;
+      const ext = file.name.split('.').pop() || 'png';
+      const filePath = `${draft.id}/cover-upload.${ext}`;
       try {
-        const ext = file.name.split('.').pop() || 'png';
-        const filePath = `${draft.id}/cover-upload.${ext}`;
         const { error: uploadError } = await supabase.storage
           .from('blog-images')
           .upload(filePath, file, { contentType: file.type, upsert: true });
         
         if (!uploadError) {
-          const { data: urlData } = supabase.storage
-            .from('blog-images')
-            .getPublicUrl(filePath);
-          finalUrl = urlData.publicUrl;
+          finalUrl = await getBestBlogImageUrl(filePath);
         }
       } catch {
         // fallback to dataUrl
@@ -116,6 +130,7 @@ export default function EditorPage() {
         type: 'cover',
         prompt: draft.coverImage?.prompt || `Capa para ${draft.title}`,
         url: finalUrl,
+        filePath,
         sectionReference: 'cover',
         altText: draft.coverImage?.altText || draft.title,
       });

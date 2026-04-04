@@ -20,6 +20,7 @@ export interface GeneratedImage {
   type: 'cover' | 'internal';
   prompt: string;
   url: string;
+  filePath?: string;
   dataUrl?: string;
   sectionReference: string;
   altText: string;
